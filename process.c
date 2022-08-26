@@ -2,6 +2,11 @@
 #include "list.h"
 #include "process.h"
 
+bool process_promise_pass(Process *proc){
+	return true;
+}
+
+
 bool process_has_exe(Process *proc){
 	return proc->exe[0] != 0;
 }
@@ -181,6 +186,12 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 	process_stat(proc, name);
 
 	scan_proc_dir(list, pid_path, proc, period, cf);
+
+	if(!process_promise_pass(proc)){
+		process_destroy(proc);
+		node_destroy(proc_node);
+		continue;
+	}
 
 	if(proc->flags & PF_KTHREAD){
 		process_destroy(proc);
