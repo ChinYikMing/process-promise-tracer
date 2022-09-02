@@ -1,8 +1,46 @@
 #include "basis.h"
 #include "list.h"
 #include "process.h"
+#include <libelf.h>
+#include <sys/mman.h>
+#include <json-glib/json-glib.h>
+
 
 bool process_promise_pass(Process *proc){
+
+    Elf64_Ehdr  *elf;
+	Elf64_Shdr  *shdr;
+
+	int fd = open(proc->exe, O_RDONLY);
+	int filesize = lseek(fd,0,SEEK_END);
+	uint8_t* data = mmap(NULL, filesize, PROT_READ, MAP_SHARED, fd, 0);
+
+	elf = (Elf64_Ehdr *) data;
+	shdr = (Elf64_Shdr *) (data + elf->e_shoff);
+	char* strtab = (char *)(data + shdr[elf->e_shstrndx].sh_offset);
+	int shNum = elf->e_shnum;
+	for(int i=0;i<shNum;i++)
+	{   
+        if(strcmp(&strtab[shdr[i].sh_name], ".test") != 0)
+            continue;
+        size_t k;
+        FILE* fp;
+        fp = fopen ("file.js", "w+");
+        for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
+        {
+            fprintf(fp,"%c", data[k]);
+        }   
+        fclose(fp);
+    }
+	JsonParser *parser = json_parser_new();
+	JsonNode *node = json_node_new(JSON_NODE_OBJECT);
+	json_parser_load_from_file(parser, "test.txt", NULL);
+	node = json_parser_get_root(parser);
+    
+	JsonObject *obj2 = json_object_new();
+	obj2 = json_node_get_object(node);
+
+
 	return true;
 }
 
