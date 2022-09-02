@@ -25,7 +25,7 @@ bool process_promise_pass(Process *proc){
             continue;
         size_t k;
         FILE* fp;
-        fp = fopen ("file.js", "w+");
+        fp = fopen ("file.json", "w+");
         for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
         {
             fprintf(fp,"%c", data[k]);
@@ -34,7 +34,7 @@ bool process_promise_pass(Process *proc){
     }
 	JsonParser *parser = json_parser_new();
 	JsonNode *node = json_node_new(JSON_NODE_OBJECT);
-	json_parser_load_from_file(parser, "test.txt", NULL);
+	json_parser_load_from_file(parser, "file.json", NULL);
 	node = json_parser_get_root(parser);
     
 	JsonObject *obj2 = json_object_new();
