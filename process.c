@@ -8,7 +8,7 @@
 
 bool process_promise_pass(Process *proc){
 
-    Elf64_Ehdr  *elf;
+    	Elf64_Ehdr  *elf;
 	Elf64_Shdr  *shdr;
 
 	int fd = open(proc->exe, O_RDONLY);
@@ -21,6 +21,7 @@ bool process_promise_pass(Process *proc){
 	int shNum = elf->e_shnum;
 	for(int i=0;i<shNum;i++)
 	{   
+<<<<<<< HEAD
         if(strcmp(&strtab[shdr[i].sh_name], ".test") != 0)
             continue;
         size_t k;
@@ -32,6 +33,19 @@ bool process_promise_pass(Process *proc){
         }   
         fclose(fp);
     }
+=======
+		if(strcmp(&strtab[shdr[i].sh_name], ".test") != 0)
+		    continue;
+		size_t k;
+		FILE* fp;
+		fp = fopen ("file.js", "w+");
+		for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
+		{
+		    fprintf(fp,"%c", data[k]);
+		}   
+		fclose(fp);
+    	}
+>>>>>>> ac158faf1464a775c7aca8b6d6aeb5f48b4f3376
 	JsonParser *parser = json_parser_new();
 	JsonNode *node = json_node_new(JSON_NODE_OBJECT);
 	json_parser_load_from_file(parser, "file.json", NULL);
