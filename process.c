@@ -21,17 +21,17 @@ bool process_promise_pass(Process *proc){
 	int shNum = elf->e_shnum;
 	for(int i=0;i<shNum;i++)
 	{   
-        if(strcmp(&strtab[shdr[i].sh_name], ".test") != 0)
-            continue;
-        size_t k;
-        FILE* fp;
-        fp = fopen ("file.json", "w+");
-        for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
-        {
-            fprintf(fp,"%c", data[k]);
-        }   
-        fclose(fp);
-    }
+		if(strcmp(&strtab[shdr[i].sh_name], ".test") != 0)
+		    continue;
+		size_t k;
+		FILE* fp;
+		fp = fopen ("file.json", "w+");
+		for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
+		{
+		    fprintf(fp,"%c", data[k]);
+		}   
+		fclose(fp);
+    	}
 	JsonParser *parser = json_parser_new();
 	JsonNode *node = json_node_new(JSON_NODE_OBJECT);
 	json_parser_load_from_file(parser, "file.json", NULL);
