@@ -14,8 +14,6 @@ bool process_promise_pass(Process *proc){
 	int fd = open(proc->exe, O_RDONLY);
 	int filesize = lseek(fd,0,SEEK_END);
 	uint8_t* data = mmap(NULL, filesize, PROT_READ, MAP_SHARED, fd, 0);
-	close(fd);
-	munmap(data, filesize);
 	
 	elf = (Elf64_Ehdr *) data;
 	shdr = (Elf64_Shdr *) (data + elf->e_shoff);
@@ -33,7 +31,11 @@ bool process_promise_pass(Process *proc){
 		    fprintf(fp,"%c", data[k]);
 		}   
 		fclose(fp);
-    }
+    	}
+	
+	close(fd);
+	munmap(data, filesize);
+
 	JsonParser *parser = json_parser_new();
 	JsonNode *node = json_node_new(JSON_NODE_OBJECT);
 	json_parser_load_from_file(parser, "file.json", NULL);
