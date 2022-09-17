@@ -1,0 +1,15 @@
+[Unit]
+Description=Process Promise Tracer Service
+#Documentation=URL
+
+[Service]
+Type=simple
+ExecStartPre=/usr/sbin/process-promise-tracerd -c 
+ExecStart=/usr/sbin/process-promise-tracerd       
+ExecReload=/usr/sbin/process-promise-tracerd -c   
+ExecReload=kill -HUP $MAINPID                     
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
+Alias=process-promise-tracerd.service

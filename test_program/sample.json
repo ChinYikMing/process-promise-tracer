@@ -1,0 +1,4 @@
+{
+	"prog": "test"
+	"devices": ["/dev/videox", "/dev/ttyx"]
+}
