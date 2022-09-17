@@ -53,6 +53,14 @@ bool process_has_exe(Process *proc){
 	return proc->exe[0] != 0;
 }
 
+bool process_is_kernel_thread(Process *proc){
+	return proc->flags & PF_KTHREAD;
+}
+
+bool process_is_user_thread(Process *proc){
+	return !process_is_kernel_thread(proc);
+}
+
 bool process_match_exe(Process *proc, const char *untrusted_proc){
 	if(!process_has_exe(proc))
 		return false;
@@ -229,23 +237,27 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 
 	scan_proc_dir(list, pid_path, proc, period, cf);
 
+	/*
 	if(!process_promise_pass(proc)){
 		process_destroy(proc);
 		node_destroy(proc_node);
 		continue;
 	}
+	*/
 
-	if(proc->flags & PF_KTHREAD){
+	if(process_is_kernel_thread(proc)){
 		process_destroy(proc);
 		node_destroy(proc_node);
 		continue;
 	}
 
+	/*
 	if(process_trusted(proc, cf)){
 		process_destroy(proc);
 		node_destroy(proc_node);
 		continue;
 	}
+	*/
 
 	if(!pre_exist){
 		printf("new one, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
