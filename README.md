@@ -49,6 +49,13 @@ $systemctl reload process-promise-tracerd
 ```
 $systemctl status process-promise-tracerd
 ```
+### Program Configuration file
+* located in /etc/process_promise_tracer.conf
+* Each line is a program name to be traced
+* Sample configuration file, only /usr/bin/test program will be traced by the daemon program
+```
+/usr/bin/test
+```
 
 ## Authors
 
