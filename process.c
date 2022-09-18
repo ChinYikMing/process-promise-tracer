@@ -102,6 +102,22 @@ void process_destroy(Process *proc){
 	return;
 }
 
+void process_updateExe(Process *proc, const char *pid){
+	char exe_sym[32] = {0};
+	strcpy(exe_sym, PROC_DIR);
+	strcat(exe_sym, "/");
+	strcat(exe_sym, pid);
+	strcat(exe_sym, "/");
+	strcat(exe_sym, "exe");
+
+	if(access(exe_sym, F_OK) == 0){ // check because kernel thread do not has this file
+		ssize_t size = readlink(exe_sym, proc->exe, PATH_MAX);
+		proc->exe[size] = 0;
+
+		assert(size != -1);
+	}
+}
+
 int process_stat(Process *proc, const char *pid){
 	// read stat file
 	{
@@ -165,21 +181,7 @@ int process_stat(Process *proc, const char *pid){
 	}
 
 	// readlink executable
-	{
-		char exe_sym[32] = {0};
-		strcpy(exe_sym, PROC_DIR);
-		strcat(exe_sym, "/");
-		strcat(exe_sym, pid);
-		strcat(exe_sym, "/");
-		strcat(exe_sym, "exe");
-
-		if(access(exe_sym, F_OK) == 0){ // check because kernel thread do not has this file
-			ssize_t size = readlink(exe_sym, proc->exe, PATH_MAX);
-			proc->exe[size] = 0;
-
-			assert(size != -1);
-		}
-	}
+	process_updateExe(proc, pid);
 	
 	return 0;
 }
@@ -251,19 +253,20 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		continue;
 	}
 
-	/*
 	if(process_trusted(proc, cf)){
 		process_destroy(proc);
 		node_destroy(proc_node);
 		continue;
 	}
-	*/
 
 	if(!pre_exist){
-		printf("new one, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
+		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
 		list_push_back(list, proc_node);
-	} else { // check zombie process here
-
+	} else { // exist before
+		if(proc->state != 'Z'){ // process is not zombie
+			process_updateExe(proc, name); // pid might be reused, then the exe could change, such as calling execve series function
+			printf("new exe: %s\n", proc->exe);
+		}
 	}
     }
 
