@@ -26,29 +26,39 @@ insecure issues about the behind scene actions for example record down the video
 * make
 * make install
 
+### Uninstalling
+
+* make uninstall
+
 ### Executing program
 
 * the program is a daemon, you can control it via systemctl command
+
 * start the daemon
 ```
 $systemctl start process-promise-tracerd
 ```
+
 * stop the daemon
 ```
 $systemctl stop process-promise-tracerd
 ```
+
 * restart the daemon
 ```
 $systemctl restart process-promise-tracerd
 ```
+
 * reload the daemon config
 ```
 $systemctl reload process-promise-tracerd
 ```
+
 * check the status of the daemon
 ```
 $systemctl status process-promise-tracerd
 ```
+
 ### Program Configuration file
 * located in /etc/process_promise_tracer.conf
 * Each line is a program name to be traced
