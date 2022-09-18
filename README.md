@@ -19,6 +19,8 @@ insecure issues about the behind scene actions for example record down the video
 * make
 * libelf-dev
 * libjson-glib-1.0-0
+* libjson-glib-1.0-common
+* libjson-glib-dev
 
 ### Installing
 
