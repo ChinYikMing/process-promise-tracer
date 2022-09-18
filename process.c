@@ -1,10 +1,13 @@
 #include "basis.h"
 #include "list.h"
 #include "process.h"
+#include "syscall_trace.h"
 #include <libelf.h>
 #include <sys/mman.h>
+#include <sys/reg.h>
+#include <sys/user.h>
+#include <sys/syscall.h>
 #include <json-glib/json-glib.h>
-
 
 bool process_promise_pass(Process *proc){
 
@@ -186,6 +189,47 @@ int process_stat(Process *proc, const char *pid){
 	return 0;
 }
 
+void process_syscall_trace_attach(pid_t pid, int syscall){
+
+    ptrace(PTRACE_ATTACH, pid, NULL, NULL);
+    fprintf(stderr, " [TRACE] Attached to process. Ok. \n");
+
+    _ptrace(PTRACE_SETOPTIONS, pid, NULL, (void*) PTRACE_O_TRACECLONE);
+
+    _ptrace(PTRACE_SETOPTIONS, pid, NULL, (void*) PTRACE_O_TRACESYSGOOD);
+
+    struct user_regs_struct regs;
+    fprintf(stderr, " [TRACE] Start event loop. Ok. \n");
+    for(;;) {
+        // Intercept system call entry 
+        if (ptrace_wait_syscall(pid) == TERMINATED) {
+            fprintf(stderr, " [TRACE] (1) Monitored process has terminated. \n");
+            break;
+        }
+
+        // Intercept system call exit 
+        if (ptrace_wait_syscall(pid) == TERMINATED) {
+            fprintf(stderr, " [TRACE] (2) Monitored process has terminated. \n");
+            break;
+        }
+
+        _ptrace(PTRACE_GETREGS, pid, NULL, &regs);
+
+        // Get system call number
+        int _syscall = regs.orig_rax;
+        if (_syscall == syscall) {
+            fprintf(stderr, "rdi: %lld\n", regs.rdi);
+            fprintf(stderr, "rsi: %lld\n", regs.rsi);
+            fprintf(stderr, "rdx: %lld\n", regs.rdx);
+            fprintf(stderr, "r10: %lld\n", regs.r10);
+            fprintf(stderr, "r8 : %lld\n", regs.r8);
+            fprintf(stderr, "r9 : %lld\n", regs.r9);
+            continue;
+        }
+    }
+	
+}
+
 // skip pid of repeat if 'repeat' in /proc/[pid]/task directory since it is same as [pid]
 void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, Config *cf){ 
     DIR *scan_dir = opendir(dir);
@@ -261,6 +305,8 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 
 	if(!pre_exist){
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
+		process_syscall_trace_attach(proc->pid, SYS_mmap);
+
 		list_push_back(list, proc_node);
 	} else { // exist before
 		if(proc->state != 'Z'){ // process is not zombie

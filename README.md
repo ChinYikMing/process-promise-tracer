@@ -69,11 +69,10 @@ $systemctl status process-promise-tracerd
 /usr/bin/test
 ```
 
-## Authors
+## Bugs
 
-Contributors names and contact info
-
-ex. 
+* ptrace attached process cannot terminated using control-C
+* ptrace will stop the daemon process to trace other processes
 
 ## Version History
 

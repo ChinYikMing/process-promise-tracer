@@ -1,5 +1,5 @@
 all:
-	gcc -g `pkg-config --cflags json-glib-1.0` process-promise-tracerd.c list.c process.c signal.c config.c -o process-promise-tracerd `pkg-config --libs json-glib-1.0`
+	gcc -g `pkg-config --cflags json-glib-1.0` process-promise-tracerd.c list.c process.c signal.c config.c syscall_trace.c -o process-promise-tracerd `pkg-config --libs json-glib-1.0`
 
 install:
 	cp process-promise-tracerd /usr/sbin/
