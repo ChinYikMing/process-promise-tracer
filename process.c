@@ -97,6 +97,9 @@ Process *process_create(int pid){
 	proc->state = 0;
 	proc->flags = 0;
 	memset(proc->exe, 0, sizeof(PATH_MAX));
+
+	LIST_INIT(proc->fdlist);
+
 	return proc;
 }
 
@@ -119,6 +122,57 @@ void process_updateExe(Process *proc, const char *pid){
 
 		assert(size != -1);
 	}
+}
+
+Fd *fd_create(int fd, const char *path){
+	Fd *_fd = malloc(sizeof(Fd));
+	if(!_fd)
+		return NULL;
+
+	_fd->nr = fd;
+	strcpy(_fd->path, path);
+
+	return _fd;
+}
+
+void process_updateFdList(Process *proc, const char *pid){
+	char fd_dir_path[32] = {0};
+	strcpy(fd_dir_path, PROC_DIR);
+	strcat(fd_dir_path, "/");
+	strcat(fd_dir_path, pid);
+	strcat(fd_dir_path, "/");
+	strcat(fd_dir_path, "fd");
+
+        DIR *fd_dir = opendir(fd_dir_path);
+        DIRent *entry;
+        if(!fd_dir){
+	   return;
+        }
+
+	char fd_path[PATH_MAX];
+	char fd_file[32];
+        while((entry = readdir(fd_dir))){
+	    const char *name = entry->d_name;
+	    unsigned int fd = (unsigned int) strtol(name, NULL, 10);
+
+            if(strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+                continue;
+
+	    memset(fd_file, 0, PATH_MAX);
+	    strcpy(fd_file, fd_dir_path);
+	    strcat(fd_file, "/");
+	    strcat(fd_file, name);
+
+	    ssize_t size = readlink(fd_file, fd_path, PATH_MAX);
+	    fd_path[size] = 0;
+
+	    Fd *_fd = fd_create(fd, fd_path);
+	    Node *fd_node = node_create(_fd);
+	    list_push_back(&proc->fdlist, fd_node);
+        }
+
+        closedir(fd_dir);
+        return;
 }
 
 int process_stat(Process *proc, const char *pid){
@@ -185,7 +239,7 @@ int process_stat(Process *proc, const char *pid){
 
 	// readlink executable
 	process_updateExe(proc, pid);
-	
+
 	return 0;
 }
 
@@ -303,9 +357,12 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		continue;
 	}
 
+	// read process fd list
+	process_updateFdList(proc, name);
+	
 	if(!pre_exist){
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
-		process_syscall_trace_attach(proc->pid, SYS_mmap);
+		//process_syscall_trace_attach(proc->pid, SYS_mmap);
 
 		list_push_back(list, proc_node);
 	} else { // exist before
