@@ -363,9 +363,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 	if(!pre_exist){
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
 		pid_t child = fork();
-		if(child == 0) {
-			process_syscall_trace_attach(proc->pid, SYS_mmap);
-		}
+		if(child == 0){ process_syscall_trace_attach(proc->pid, SYS_mmap);}
 		else{
 			int status;
 			while(waitpid(child, &status, 0) && !WIFEXITED(status)){;}
