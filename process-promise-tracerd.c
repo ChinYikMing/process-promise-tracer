@@ -9,7 +9,7 @@ int main(int argc, char **argv){
 		exit(config_parse(CONFIG_FILE));
 
 	Config config;
-	CONFIG_INIT(config);
+	config_init(&config);
 	config_read(&config, CONFIG_FILE);
 
 	struct sigaction sa;
@@ -21,8 +21,8 @@ int main(int argc, char **argv){
 	self_pid = getpid();
 	sprintf(self_name, "%d", self_pid);
 
-	List list;
-	LIST_INIT(list);
+	List *proc_list = malloc(sizeof(List));
+	LIST_INIT(proc_list);
 
 	while(1){
 		sleep(1);
@@ -32,10 +32,9 @@ int main(int argc, char **argv){
 			config_read(&config, CONFIG_FILE);
 		}
 
-		scan_proc_dir(&list, PROC_DIR, NULL, 0.5, &config);
-		printf("process count: %zu\n", list.size);
+		scan_proc_dir(proc_list, PROC_DIR, NULL, 0.5, &config);
+		size_t proc_list_size = list_size(proc_list);
+		printf("process count: %zu\n", proc_list_size);
 	}
-
-	// int tmpfd = open("/tmp/testfile", O_RDONLY | O_CREAT); // for testing systemctl
 	return 0;
 }

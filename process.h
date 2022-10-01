@@ -5,19 +5,16 @@
 #include "config.h"
 #include <limits.h>
 
-typedef struct fd {
-	unsigned int nr;
-	char path[PATH_MAX];
-} Fd;
-
-Fd *fd_create(int fd, const char *path);
+#define PROC_SIZE (PAGE_SIZE << 1) // PATH_MAX already occupy a PAGE_SIZE so we have to left shift 1 bit
 
 typedef struct process {
 	pid_t pid;
 	char state; // running, sleeping in an interruptible wait, waiting in uninterruptible disk sleep, zombie, stopped
 	uint32_t flags;  // currently used for detecting if is a kernel thread and skip tracing it because normally kernel threads are safe
 	char exe[PATH_MAX];
-	List fdlist;
+	pid_t tracer;
+	List *fdlist;
+	List *mmapbuflist;
 } Process;
 
 Process *process_create(int pid);

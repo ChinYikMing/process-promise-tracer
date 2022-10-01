@@ -15,74 +15,61 @@ void node_destroy(Node *node){
 	free(node);
 }
 
-int list_push_back(List *list, Node *node){
-    list->size++;
+size_t list_size(List *list){
+	return list->size;
+}
 
-    if(!list->head){
-	list->head = node;
-	return 0;
+int list_push_back(List *list, Node *node){
+    if(!list)
+	    return 1;
+
+    size_t size = list_size(list);
+    if(0 == size){
+    	list->head = node;
+	list->tail = node;
+	goto add_node;
     }
 
-    Node *ptr = list->head;
-    while(ptr->next && ptr->next != list->head)
-	ptr = ptr->next;
+    list->tail->next = node;
+    list->tail = node;
 
-    ptr->next = node;
-    node->prev = ptr; 
-
-    /* implement circular linked list */
-    node->next = list->head;
-    list->head->prev = node;
+add_node:
+    list->size++;
     return 0;
 }
 
 int list_push_front(List *list, Node *node){
-    list->size++;
+    if(!list)
+	    return 1;
 
-    if(!list->head){
-	list->head = node;
-	return 0;
+    size_t size = list_size(list);
+    if(0 == size){
+    	list->head = node;
+	list->tail = node;
+	goto add_node;
     }
 
-    /* find the last node to implement circular linked list */
-    Node *ptr = list->head;
-    while(ptr->next && ptr->next != list->head)
-	ptr = ptr->next;
-
-    ptr->next = node;
-    node->prev = ptr;
-
-    /* implement circular linked list */
     node->next = list->head;
-    list->head->prev = node;
     list->head = node;
+
+add_node:
+    list->size++;
     return 0;
 }
 
 Node *list_get_node_by_pid(List *list, pid_t pid, bool *pre_exist){
-	Node *head = list->head;
-	Node **start = &list->head;
 	Node *node = NULL;
 	Process *proc = NULL;
 
-	while((node = *start)){
-		proc = node->data;
+	LIST_FOR_EACH(list, node){
+		proc = LIST_ENTRY(node, Process);
 		if(proc->pid == pid){
 			*pre_exist = true;
 			return node;
 		}
-
-		start = &node->next;
-		if(*start == head)
-			break;
 	}
 
 	*pre_exist = false;
-	proc = process_create(pid);
-	assert(proc != NULL);
-	node = node_create((void *) proc);
-	assert(node != NULL);
-
-	return node;
+	return NULL;
 }
 

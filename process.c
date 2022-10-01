@@ -51,6 +51,52 @@ bool process_promise_pass(Process *proc){
 	return true;
 }
 
+typedef struct fd {
+        unsigned int nr;
+        char path[PATH_MAX];
+} Fd;
+
+Fd *fd_create(int fd, const char *path){
+	Fd *_fd = malloc(sizeof(Fd));
+	if(!_fd)
+		return NULL;
+
+	_fd->nr = fd;
+	strcpy(_fd->path, path);
+
+	return _fd;
+}
+
+int fdlist_init(List **fdlist){
+	*fdlist = malloc(sizeof(List));
+	if(!*fdlist)
+		return 1;
+
+	return 0;
+}
+
+typedef struct mmap_buf {
+        void *start;
+        size_t len;
+} Mmapbuf;
+
+Mmapbuf *mmapbuf_create(void *buf_start, size_t buf_len){
+	Mmapbuf *mmapbuf = malloc(sizeof(Mmapbuf));
+	if(!mmapbuf)
+		return NULL;
+
+	mmapbuf->start = buf_start;
+	mmapbuf->len = buf_len;
+	return mmapbuf;
+}
+
+int mmapbuflist_init(List **mmapbuflist){
+	*mmapbuflist = malloc(sizeof(List));
+	if(!*mmapbuflist)
+		return 1;
+
+	return 0;
+}
 
 bool process_has_exe(Process *proc){
 	return proc->exe[0] != 0;
@@ -70,10 +116,10 @@ bool process_match_exe(Process *proc, const char *untrusted_proc){
 	return strcmp(proc->exe, untrusted_proc) == 0 ? true : false;
 }
 
-bool process_trusted(Process *proc, Config *cf){
+bool process_is_trusted(Process *proc, Config *cf){
 	Conf *c = NULL;
-	Node *n = cf->list.head;
-	size_t cf_list_size = cf->list.size;
+	Node *n = cf->list->head;
+	size_t cf_list_size = list_size(cf->list);
 
 	for(size_t i = 0; i < cf_list_size; i++){
 		c = n->data;
@@ -89,26 +135,29 @@ bool process_trusted(Process *proc, Config *cf){
 }
 
 Process *process_create(int pid){
-	Process *proc = malloc(sizeof(Process));
-	if(!proc)
+	Process *proc = mmap(NULL, PROC_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if(proc == MAP_FAILED)
 		return NULL;
 
 	proc->pid = pid;
 	proc->state = 0;
 	proc->flags = 0;
 	memset(proc->exe, 0, sizeof(PATH_MAX));
-
-	LIST_INIT(proc->fdlist);
+	proc->tracer = 0;
+			//fdlist_init(&proc->fdlist);
 
 	return proc;
 }
 
 void process_destroy(Process *proc){
-	free(proc);
+	munmap(proc, PROC_SIZE);
 	return;
 }
 
-void process_updateExe(Process *proc, const char *pid){
+void process_updateExe(Process *proc){
+	char pid[32];
+	sprintf(pid, "%d", proc->pid);
+
 	char exe_sym[32] = {0};
 	strcpy(exe_sym, PROC_DIR);
 	strcat(exe_sym, "/");
@@ -124,18 +173,10 @@ void process_updateExe(Process *proc, const char *pid){
 	}
 }
 
-Fd *fd_create(int fd, const char *path){
-	Fd *_fd = malloc(sizeof(Fd));
-	if(!_fd)
-		return NULL;
+void process_updateFdList(Process *proc){
+	char pid[32];
+	sprintf(pid, "%d", proc->pid);
 
-	_fd->nr = fd;
-	strcpy(_fd->path, path);
-
-	return _fd;
-}
-
-void process_updateFdList(Process *proc, const char *pid){
 	char fd_dir_path[32] = {0};
 	strcpy(fd_dir_path, PROC_DIR);
 	strcat(fd_dir_path, "/");
@@ -168,14 +209,17 @@ void process_updateFdList(Process *proc, const char *pid){
 
 	    Fd *_fd = fd_create(fd, fd_path);
 	    Node *fd_node = node_create(_fd);
-	    list_push_back(&proc->fdlist, fd_node);
+	    list_push_back(proc->fdlist, fd_node);
         }
 
         closedir(fd_dir);
         return;
 }
 
-int process_stat(Process *proc, const char *pid){
+int process_stat(Process *proc){
+	char pid[32];
+	sprintf(pid, "%d", proc->pid);
+
 	// read stat file
 	{
 		char stat_file[32] = {0};
@@ -238,12 +282,13 @@ int process_stat(Process *proc, const char *pid){
 	}
 
 	// readlink executable
-	process_updateExe(proc, pid);
+	process_updateExe(proc);
 
 	return 0;
 }
 
-void process_syscall_trace_attach(pid_t pid, int syscall){
+void process_syscall_trace_attach(Process *proc, int syscall){
+    pid_t pid = proc->pid;
 
     ptrace(PTRACE_ATTACH, pid, NULL, NULL);
     fprintf(stderr, " [TRACE] Attached to process. Ok. \n");
@@ -272,12 +317,24 @@ void process_syscall_trace_attach(pid_t pid, int syscall){
         // Get system call number
         int _syscall = regs.orig_rax;
         if (_syscall == syscall) {
+	    void *buf_start = (void *) regs.rax;
+	    size_t buf_len = (size_t) regs.rsi;
+	    Mmapbuf *mmapbuf = mmapbuf_create(buf_start, buf_len);
+	    Node *mmapbuf_node = node_create((void *) mmapbuf);
+            fprintf(stderr, "rax: %p\n", (void *)regs.rax);
+            fprintf(stderr, "rsi: %lld\n", regs.rsi);
+
+	    list_push_back(proc->mmapbuflist, mmapbuf_node);
+
+            /*
+            fprintf(stderr, "rax: %p\n", (void *)regs.rax);
             fprintf(stderr, "rdi: %lld\n", regs.rdi);
             fprintf(stderr, "rsi: %lld\n", regs.rsi);
             fprintf(stderr, "rdx: %lld\n", regs.rdx);
             fprintf(stderr, "r10: %lld\n", regs.r10);
             fprintf(stderr, "r8 : %lld\n", regs.r8);
             fprintf(stderr, "r9 : %lld\n", regs.r9);
+	    */
             continue;
         }
     }
@@ -332,8 +389,14 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 	bool pre_exist;
 
 	Node *proc_node = list_get_node_by_pid(list, pid, &pre_exist);
-	Process *proc = proc_node->data;
-	process_stat(proc, name);
+	Process *proc = NULL;
+	if(!proc_node){
+		proc = process_create(pid);
+		proc_node = node_create((void *) proc);
+	} else {
+		proc = proc_node->data;
+	}
+	process_stat(proc);
 
 	scan_proc_dir(list, pid_path, proc, period, cf);
 
@@ -351,24 +414,52 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		continue;
 	}
 
-	if(process_trusted(proc, cf)){
+	if(process_is_trusted(proc, cf)){
 		process_destroy(proc);
 		node_destroy(proc_node);
 		continue;
 	}
 
-	// read process fd list
-	process_updateFdList(proc, name);
-	
 	if(!pre_exist){
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
-		pid_t child = fork();
-		if(child == 0){ process_syscall_trace_attach(proc->pid, SYS_mmap); }
 
-		list_push_back(list, proc_node);
+		pid_t child = fork();
+		if(child == 0){ 
+			fdlist_init(&proc->fdlist);
+			mmapbuflist_init(&proc->mmapbuflist);
+
+			while(1){
+				sleep(1);
+
+				// read process open fd list( read here because malloc memory cannot be shared with child )
+				process_updateFdList(proc);
+
+				Node *iter;
+				Fd *fd;
+				LIST_FOR_EACH(proc->fdlist, iter){
+					fd = LIST_ENTRY(iter, Fd);
+					if(0 == strcmp(fd->path, "/dev/video0")){
+						process_syscall_trace_attach(proc, SYS_mmap); 
+						//printf("video fd: %d\n", fd->nr);
+
+						Node *iter2;
+						Mmapbuf *mmapbuf;
+						LIST_FOR_EACH(proc->mmapbuflist, iter2){
+							mmapbuf = LIST_ENTRY(iter2, Mmapbuf);
+							printf("buf start: %p, buf len: %zu\n", mmapbuf->start, mmapbuf->len);
+						}
+					}
+
+				}
+			}
+
+		} else {
+			proc->tracer = child;
+			list_push_back(list, proc_node);
+		}
 	} else { // exist before
 		if(proc->state != 'Z'){ // process is not zombie
-			process_updateExe(proc, name); // pid might be reused, then the exe could change, such as calling execve series function
+			process_updateExe(proc); // pid might be reused, then the exe could change, such as calling execve series function
 			printf("new exe: %s\n", proc->exe);
 		}
 	}

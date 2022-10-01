@@ -19,6 +19,10 @@
 typedef struct dirent DIRent;
 typedef struct stat Stat;
 
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 4096 // normally is 4096, to be more precise would be sysconf(PAGESIZE)
+#endif
+
 #ifndef BUF_SIZE
 #define BUF_SIZE 1024
 #endif

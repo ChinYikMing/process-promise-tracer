@@ -20,9 +20,10 @@ Conf *conf_create(const char *key, const char *val);
 	LIST_INIT(cf.list) \
 }
 typedef struct config {
-	List list;
+	List *list;
 } Config;
 
+int config_init(Config *cf);
 int config_parse(const char *config_file);
 int config_read(Config *cf, const char *config_file);
 int config_add(Config *cf, Conf *c);

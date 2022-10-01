@@ -2,6 +2,15 @@
 #include "list.h"
 #include "basis.h"
 
+int config_init(Config *cf){
+	cf->list = malloc(sizeof(List));
+	if(!cf->list)
+		return 1;
+
+	LIST_INIT(cf->list);
+	return 0;
+}
+
 int config_parse(const char *config_file){
 	return CONFIG_PARSE_SUCCESS;
 }
@@ -28,7 +37,7 @@ int config_add(Config *cf, Conf *c){
 	if(!node)
 		return 1;
 
-	return list_push_back(&cf->list, node);
+	return list_push_back(cf->list, node);
 }
 
 int config_del(Config *cf, Conf *c){
