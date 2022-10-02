@@ -13,6 +13,7 @@ typedef struct process {
 	uint32_t flags;  // currently used for detecting if is a kernel thread and skip tracing it because normally kernel threads are safe
 	char exe[PATH_MAX];
 	pid_t tracer;
+	bool dead;
 	List *fdlist;
 	List *mmapbuflist;
 } Process;

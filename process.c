@@ -24,7 +24,7 @@ bool process_promise_pass(Process *proc){
 	int shNum = elf->e_shnum;
 	for(int i=0;i<shNum;i++)
 	{   
-		if(strcmp(&strtab[shdr[i].sh_name], ".test") != 0)
+		if(0 != strcmp(&strtab[shdr[i].sh_name], ".test"))
 		    continue;
 		size_t k;
 		FILE* fp;
@@ -62,17 +62,49 @@ Fd *fd_create(int fd, const char *path){
 		return NULL;
 
 	_fd->nr = fd;
+	memset(_fd->path, 0, PATH_MAX);
 	strcpy(_fd->path, path);
 
 	return _fd;
 }
 
 int fdlist_init(List **fdlist){
-	*fdlist = malloc(sizeof(List));
-	if(!*fdlist)
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
 		return 1;
 
+	LIST_INIT(tmp);
+
+	*fdlist = tmp;
 	return 0;
+}
+
+Node *list_get_node_by_pid(List *list, pid_t pid, bool *pre_exist){
+	Node *node = NULL;
+	Process *proc = NULL;
+
+	LIST_FOR_EACH(list, node){
+		proc = LIST_ENTRY(node, Process);
+		if(proc->pid == pid){
+			*pre_exist = true;
+			return node;
+		}
+	}
+
+	*pre_exist = false;
+	return NULL;
+}
+
+Node *list_get_node_by_fd(List *list, int _fd){
+	Node *node = NULL;
+	Fd *fd = NULL;
+
+	LIST_FOR_EACH(list, node){
+		fd = LIST_ENTRY(node, Fd);
+		if(fd->nr == _fd)
+			return node;
+	}
+	return NULL;
 }
 
 typedef struct mmap_buf {
@@ -91,11 +123,42 @@ Mmapbuf *mmapbuf_create(void *buf_start, size_t buf_len){
 }
 
 int mmapbuflist_init(List **mmapbuflist){
-	*mmapbuflist = malloc(sizeof(List));
-	if(!*mmapbuflist)
+	List *tmp = malloc(sizeof(List));
+	if(!tmp)
 		return 1;
 
+	LIST_INIT(tmp);
+
+	*mmapbuflist = tmp;
 	return 0;
+}
+
+bool process_exists(Process *proc){
+	char pid[32] = {0};
+	sprintf(pid, "%d", proc->pid);
+
+	char proc_dir_path[PATH_MAX] = {0};
+	strcpy(proc_dir_path, PROC_DIR);
+	strcat(proc_dir_path, "/");
+	strcat(proc_dir_path, pid);
+
+	DIR *proc_dir = opendir(proc_dir_path);
+	if(proc_dir){
+		closedir(proc_dir);
+		return true;
+	} else if(ENOENT == errno){
+		return false;
+	} else { 
+		// opendir other reasons failed
+	}
+}
+
+bool process_is_dead(Process *proc){
+	return proc->dead;
+}
+
+bool process_is_zombie(Process *proc){
+	return proc->state == 'Z';
 }
 
 bool process_has_exe(Process *proc){
@@ -113,7 +176,7 @@ bool process_is_user_thread(Process *proc){
 bool process_match_exe(Process *proc, const char *untrusted_proc){
 	if(!process_has_exe(proc))
 		return false;
-	return strcmp(proc->exe, untrusted_proc) == 0 ? true : false;
+	return (0 == strcmp(proc->exe, untrusted_proc)) ? true : false;
 }
 
 bool process_is_trusted(Process *proc, Config *cf){
@@ -123,7 +186,7 @@ bool process_is_trusted(Process *proc, Config *cf){
 
 	for(size_t i = 0; i < cf_list_size; i++){
 		c = n->data;
-		if(strcmp(c->key, "prog") == 0){
+		if(0 == strcmp(c->key, "prog")){
 			if(process_match_exe(proc, c->val)){
 				return false;
 			}
@@ -144,7 +207,7 @@ Process *process_create(int pid){
 	proc->flags = 0;
 	memset(proc->exe, 0, sizeof(PATH_MAX));
 	proc->tracer = 0;
-			//fdlist_init(&proc->fdlist);
+	proc->dead = false;
 
 	return proc;
 }
@@ -155,7 +218,7 @@ void process_destroy(Process *proc){
 }
 
 void process_updateExe(Process *proc){
-	char pid[32];
+	char pid[32] = {0};
 	sprintf(pid, "%d", proc->pid);
 
 	char exe_sym[32] = {0};
@@ -174,7 +237,7 @@ void process_updateExe(Process *proc){
 }
 
 void process_updateFdList(Process *proc){
-	char pid[32];
+	char pid[32] = {0};
 	sprintf(pid, "%d", proc->pid);
 
 	char fd_dir_path[32] = {0};
@@ -190,15 +253,18 @@ void process_updateFdList(Process *proc){
 	   return;
         }
 
+	Node *fd_node = NULL;
+	Fd *_fd = NULL;
 	char fd_path[PATH_MAX];
 	char fd_file[32];
         while((entry = readdir(fd_dir))){
 	    const char *name = entry->d_name;
 	    unsigned int fd = (unsigned int) strtol(name, NULL, 10);
 
-            if(strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+            if(0 == strcmp(name, ".") || 0 == strcmp(name, ".."))
                 continue;
 
+	    memset(fd_path, 0, PATH_MAX);
 	    memset(fd_file, 0, PATH_MAX);
 	    strcpy(fd_file, fd_dir_path);
 	    strcat(fd_file, "/");
@@ -206,6 +272,15 @@ void process_updateFdList(Process *proc){
 
 	    ssize_t size = readlink(fd_file, fd_path, PATH_MAX);
 	    fd_path[size] = 0;
+
+	    fd_node = list_get_node_by_fd(proc->fdlist, fd);
+	    if(fd_node) {
+		    _fd = fd_node->data;
+		    if(0 != strcmp(_fd->path, fd_path)) // check if the fd path has changed
+			strcpy(_fd->path, fd_path); // update fd path
+
+		    continue;
+	    } 
 
 	    Fd *_fd = fd_create(fd, fd_path);
 	    Node *fd_node = node_create(_fd);
@@ -355,11 +430,11 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
     while((entry = readdir(scan_dir))){
 	const char *name = entry->d_name;
 
-        if(strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        if(0 == strcmp(name, ".") || 0 == strcmp(name, ".."))
                 continue;
 
 	// skip self
-	if(strcmp(name, self_name) == 0)
+	if(0 == strcmp(name, self_name))
 		continue;
 
 	// skip non-process entries
@@ -425,6 +500,8 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 
 		pid_t child = fork();
 		if(child == 0){ 
+			proc->tracer = child;
+
 			fdlist_init(&proc->fdlist);
 			mmapbuflist_init(&proc->mmapbuflist);
 
@@ -434,33 +511,46 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 				// read process open fd list( read here because malloc memory cannot be shared with child )
 				process_updateFdList(proc);
 
+				// get mmap syscall info
 				Node *iter;
 				Fd *fd;
 				LIST_FOR_EACH(proc->fdlist, iter){
 					fd = LIST_ENTRY(iter, Fd);
+					printf("fd: %d, path: %s\n", fd->nr, fd->path);
+
 					if(0 == strcmp(fd->path, "/dev/video0")){
 						process_syscall_trace_attach(proc, SYS_mmap); 
-						//printf("video fd: %d\n", fd->nr);
 
+						/*
 						Node *iter2;
 						Mmapbuf *mmapbuf;
 						LIST_FOR_EACH(proc->mmapbuflist, iter2){
 							mmapbuf = LIST_ENTRY(iter2, Mmapbuf);
 							printf("buf start: %p, buf len: %zu\n", mmapbuf->start, mmapbuf->len);
 						}
+						*/
 					}
-
 				}
-			}
 
+				if(process_is_dead(proc)){
+					printf("child exit\n");
+					_exit(EXIT_SUCCESS);
+				}
+				
+				// perf sampling address here
+				
+			}
 		} else {
-			proc->tracer = child;
 			list_push_back(list, proc_node);
 		}
 	} else { // exist before
-		if(proc->state != 'Z'){ // process is not zombie
-			process_updateExe(proc); // pid might be reused, then the exe could change, such as calling execve series function
-			printf("new exe: %s\n", proc->exe);
+		if(!process_is_zombie(proc)){
+			if(!process_exists(proc)){ // check process if exists in /proc
+				proc->dead = 1; // inform child the tracee is dead
+			} else {
+				process_updateExe(proc); // pid might be reused, then the exe could change, such as calling execve series function
+				printf("pid: %d, state: %c, new_exe: %s\n", proc->pid, proc->state, proc->exe);
+			}
 		}
 	}
     }

@@ -1,5 +1,4 @@
 #include "basis.h"
-#include "process.h"
 #include "list.h"
 
 Node *node_create(void *data){
@@ -54,21 +53,5 @@ int list_push_front(List *list, Node *node){
 add_node:
     list->size++;
     return 0;
-}
-
-Node *list_get_node_by_pid(List *list, pid_t pid, bool *pre_exist){
-	Node *node = NULL;
-	Process *proc = NULL;
-
-	LIST_FOR_EACH(list, node){
-		proc = LIST_ENTRY(node, Process);
-		if(proc->pid == pid){
-			*pre_exist = true;
-			return node;
-		}
-	}
-
-	*pre_exist = false;
-	return NULL;
 }
 
