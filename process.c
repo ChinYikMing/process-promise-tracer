@@ -362,7 +362,7 @@ int process_stat(Process *proc){
 	return 0;
 }
 
-void process_syscall_trace_attach(Process *proc, int syscall){
+void process_syscall_trace_attach(Process *proc, int fd, int syscall){
     pid_t pid = proc->pid;
 
     ptrace(PTRACE_ATTACH, pid, NULL, NULL);
@@ -392,14 +392,19 @@ void process_syscall_trace_attach(Process *proc, int syscall){
         // Get system call number
         int _syscall = regs.orig_rax;
         if (_syscall == syscall) {
-	    void *buf_start = (void *) regs.rax;
-	    size_t buf_len = (size_t) regs.rsi;
-	    Mmapbuf *mmapbuf = mmapbuf_create(buf_start, buf_len);
-	    Node *mmapbuf_node = node_create((void *) mmapbuf);
-            fprintf(stderr, "rax: %p\n", (void *)regs.rax);
-            fprintf(stderr, "rsi: %lld\n", regs.rsi);
+	    int _fd = (int) regs.r8;
 
-	    list_push_back(proc->mmapbuflist, mmapbuf_node);
+	    if(_fd == fd){
+		    void *buf_start = (void *) regs.rax;
+		    size_t buf_len = (size_t) regs.rsi;
+
+		    Mmapbuf *mmapbuf = mmapbuf_create(buf_start, buf_len);
+		    Node *mmapbuf_node = node_create((void *) mmapbuf);
+		    fprintf(stderr, "rax: %p\n", (void *)regs.rax);
+		    fprintf(stderr, "rsi: %lld\n", regs.rsi);
+
+		    list_push_back(proc->mmapbuflist, mmapbuf_node);
+	    }
 
             /*
             fprintf(stderr, "rax: %p\n", (void *)regs.rax);
@@ -519,7 +524,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 					printf("fd: %d, path: %s\n", fd->nr, fd->path);
 
 					if(0 == strcmp(fd->path, "/dev/video0")){
-						process_syscall_trace_attach(proc, SYS_mmap); 
+						process_syscall_trace_attach(proc, fd->nr, SYS_mmap); 
 
 						/*
 						Node *iter2;
