@@ -19,7 +19,6 @@ typedef struct node Node;
 struct node {
     void *data;
     Node *next;
-    Node *prev;
 };
 
 typedef struct list {
