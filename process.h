@@ -16,6 +16,11 @@ typedef struct process {
 	bool dead;
 	List *fdlist;
 	List *mmapbuflist;
+
+	// perf related
+	int perf_fd;
+	uint64_t sample_id;
+	void *rb;
 } Process;
 
 Process *process_create(int pid);

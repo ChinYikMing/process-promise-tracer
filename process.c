@@ -3,6 +3,8 @@
 #include "process.h"
 #include "syscall_trace.h"
 #include "signal.h"
+#include "perf_va.h"
+#include "perf_mem_event.h"
 #include <libelf.h>
 #include <sys/mman.h>
 #include <sys/reg.h>
@@ -208,6 +210,11 @@ Process *process_create(int pid){
 	memset(proc->exe, 0, sizeof(PATH_MAX));
 	proc->tracer = 0;
 	proc->dead = false;
+
+	// perf related
+	proc->perf_fd = -1;
+	proc->sample_id = 0;
+	proc->rb = NULL;
 
 	return proc;
 }
@@ -539,12 +546,33 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 				}
 
 				if(process_is_dead(proc)){
+					perf_event_unregister(proc);
 					printf("child exit\n");
 					_exit(EXIT_SUCCESS);
 				}
 				
 				// perf sampling address here
-				
+				int ret;
+				ret = perf_event_register(proc, ALL_LOADS);
+				assert(0 == ret);
+
+				perf_event_start(proc->perf_fd);
+
+				va_sample_t va_sample;
+				while(true){
+					ret = perf_event_rb_read(proc, &va_sample);
+					if(-EAGAIN == ret)
+					{
+					    //usleep(10000);
+					    continue;
+					}
+					else if(ret < 0){
+						printf("child exit failure\n");
+						_exit(EXIT_FAILURE);
+					} else
+					    printf("pid: %u, tid: %u, buf address: 0x%lx\n",
+						  va_sample.pid, va_sample.tid, va_sample.buf_addr);
+				}
 			}
 		} else {
 			list_push_back(list, proc_node);

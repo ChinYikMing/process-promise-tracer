@@ -16,6 +16,12 @@
 #include <signal.h>
 #include <stdbool.h>
 
+#define handle_error(msg) \
+        do { \
+                perror(msg); \
+                exit(1); \
+        } while(0)
+
 typedef struct dirent DIRent;
 typedef struct stat Stat;
 
