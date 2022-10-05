@@ -2,6 +2,7 @@
 #include "list.h"
 #include "process.h"
 #include "syscall_trace.h"
+#include "signal.h"
 #include <libelf.h>
 #include <sys/mman.h>
 #include <sys/reg.h>
@@ -11,7 +12,7 @@
 
 bool process_promise_pass(Process *proc){
 
-    Elf64_Ehdr  *elf;
+    	Elf64_Ehdr  *elf;
 	Elf64_Shdr  *shdr;
 
 	int fd = open(proc->exe, O_RDONLY);
@@ -46,7 +47,6 @@ bool process_promise_pass(Process *proc){
     
 	JsonObject *obj2 = json_object_new();
 	obj2 = json_node_get_object(node);
-
 
 	return true;
 }
@@ -367,6 +367,7 @@ void process_syscall_trace_attach(Process *proc, int fd, int syscall){
 
     ptrace(PTRACE_ATTACH, pid, NULL, NULL);
     fprintf(stderr, " [TRACE] Attached to process. Ok. \n");
+    printf("traced pid: %d\n", pid);
 
     _ptrace(PTRACE_SETOPTIONS, pid, NULL, (void*) PTRACE_O_TRACECLONE);
 
@@ -480,14 +481,6 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 
 	scan_proc_dir(list, pid_path, proc, period, cf);
 
-	/*
-	if(!process_promise_pass(proc)){
-		process_destroy(proc);
-		node_destroy(proc_node);
-		continue;
-	}
-	*/
-
 	if(process_is_kernel_thread(proc)){
 		process_destroy(proc);
 		node_destroy(proc_node);
@@ -499,6 +492,14 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		node_destroy(proc_node);
 		continue;
 	}
+
+	/*
+	if(!process_promise_pass(proc)){
+		process_destroy(proc);
+		node_destroy(proc_node);
+		continue;
+	}
+	*/
 
 	if(!pre_exist){
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);

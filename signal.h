@@ -7,4 +7,6 @@ volatile sig_atomic_t sighup_coming;
 
 void sighup_handler(int signum);
 
+int send_signal(pid_t pid, int signum);
+
 #endif
