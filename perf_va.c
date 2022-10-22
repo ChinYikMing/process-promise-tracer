@@ -25,7 +25,7 @@ int perf_event_register(Process *proc, mem_event_t event){
     attr.type = PERF_TYPE_RAW;
     attr.config = (uint64_t) event;
     attr.size = sizeof(struct perf_event_attr);
-    attr.sample_period = 100000;
+    attr.sample_period = 10000;
     // sample sample_id, pid, tid, address
     attr.sample_type = PERF_SAMPLE_IDENTIFIER /* for parsing more easily */ | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 1;
@@ -119,7 +119,7 @@ int perf_event_rb_read(Process *proc, va_sample_t *sample){
 
 	if(!rb){
 		//fprintf(stderr, "ring buffer is NULL\n");
-		return -EAGAIN;
+		return -EINVAL;
 	}
 	
 	// the metadata header
@@ -137,7 +137,7 @@ int perf_event_rb_read(Process *proc, va_sample_t *sample){
 	bool available = false;
 
 	while(tail < head){
-		uint64_t pos = tail % (PAGE_SIZE * PERF_RB_SIZE);
+		uint64_t pos = tail % (PAGE_SIZE * PERF_RB_PAGE);
 		struct perf_sample *ent = (struct perf_sample *)((char*) rb + PAGE_SIZE /* meta page */ + pos);
 
 		tail += ent->header.size; // skip header to read data

@@ -2,8 +2,10 @@
 #define PERF_VA_HDR
 
 #define PAGE_SIZE 4096      // fix me with sysconf()
-#define PERF_RB_PAGE 1+16 // according to man 2 perf_event_open, ring buffer size must be 1+2^n pages where the first page is the metadata page(struct perf_event_mmap_page)
-#define PERF_RB_SIZE PERF_RB_PAGE * PAGE_SIZE
+#define PERF_RB_PAGE 16 
+
+// according to man 2 perf_event_open, ring buffer size must be 1+2^n pages where the first page is the metadata page(struct perf_event_mmap_page)
+#define PERF_RB_SIZE (1 + PERF_RB_PAGE) * PAGE_SIZE
 
 #include <stdint.h>
 #include <stddef.h>
