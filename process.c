@@ -5,6 +5,7 @@
 #include "signal.h"
 #include "perf_va.h"
 #include "perf_mem_event.h"
+#include "cache_va.h"
 #include <libelf.h>
 #include <sys/mman.h>
 #include <sys/reg.h>
@@ -93,6 +94,15 @@ void fdlist_destroy(List *fdlist){
 		fd = LIST_ENTRY(iter, Fd);
 		fd_destroy(fd);
 	}
+}
+
+int cache_init(cacheline ***cache, int set, int assoc){
+	void *tmp = cache_create(set, assoc);
+	if(!tmp)
+		return 1;
+
+	*cache = tmp;
+	return 0;
 }
 
 Node *list_get_node_by_pid(List *list, pid_t pid, bool *pre_exist){
@@ -264,6 +274,10 @@ void process_clean(Process *proc){
 	proc->perf_fd = -1;
 	proc->sample_id = 0;
 	proc->rb = NULL;
+	proc->cache = NULL;
+	proc->hit_cnt = 0;
+	proc->miss_cnt = 0;
+	proc->eviction_cnt = 0;
 }
 
 void process_updateExe(Process *proc){
@@ -565,6 +579,31 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 			fdlist_init(&proc->fdlist);
 			devbuflist_init(&proc->devbuflist);
 
+			int ret;
+			va_sample_t va_sample;
+			char expr[32];
+
+			/*
+			// cache L3
+			int set_bit = 13;
+			int assoc = 12;
+			int block_bit = 6;
+			int set_bit = 13; // 6
+			*/
+
+			/*
+			// cache L1
+			int assoc = 8;
+			int block_bit = 6;
+			int set_bit = 6;
+			int set_size = 1 << set_bit;
+			*/
+			int assoc = 8;
+			int block_bit = 20;
+			int set_bit = 6;
+			int set_size = 1 << set_bit;
+			cache_init(&proc->cache, set_size, assoc);
+
 			while(1){
 				sleep(1);
 
@@ -572,39 +611,55 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 				process_updateFdList(proc);
 
 				// get mmap syscall info
-				process_syscall_trace_attach(proc, SYS_mmap); 
+				//process_syscall_trace_attach(proc, SYS_mmap); 
 
 				if(process_is_dead(proc)){
 					perf_event_stop(proc);
 					perf_event_unregister(proc);
+					printSummary(proc->hit_cnt, proc->miss_cnt, proc->eviction_cnt);
 					process_clean(proc);
 					printf("tracee exit\n");
 					_exit(EXIT_SUCCESS);
 				}
 				
 				// perf sampling address here
-				int ret;
 				if(-1 == proc->perf_fd){
 					ret = perf_event_register(proc, ALL_LOADS);
 					assert(0 == ret);
+					perf_event_start(proc);
 				}
 
-				perf_event_start(proc);
-
-				va_sample_t va_sample;
 				while(true){
+					if(process_is_dead(proc)){
+						perf_event_stop(proc);
+						perf_event_unregister(proc);
+						printSummary(proc->hit_cnt, proc->miss_cnt, proc->eviction_cnt);
+						process_clean(proc);
+						printf("tracee exit\n");
+						_exit(EXIT_SUCCESS);
+					}
+
 					ret = perf_event_rb_read(proc, &va_sample);
+
 					if(-EAGAIN == ret)
 					{
-					    //usleep(10000);
+					    usleep(10000);
 					    continue;
 					}
 					else if(ret < 0){
-						printf("child exit failure\n");
 						_exit(EXIT_FAILURE);
-					} else
+					} else {
+					    if(va_sample.buf_addr >= 0x7fffee0f9000 && va_sample.buf_addr <= 0x7fffee3e7000) {
+						    memset(expr, 0, 32);
+						    sprintf(expr, "L %lx", va_sample.buf_addr);
+						    cache_virtaddr(proc, set_bit, assoc, block_bit, expr);
+					    }
+
+					    /*
 					    printf("pid: %u, tid: %u, buf address: 0x%lx\n",
 						  va_sample.pid, va_sample.tid, va_sample.buf_addr);
+						  */
+					}
 				}
 			}
 		} else {

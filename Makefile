@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -g -Wall `pkg-config --cflags json-glib-1.0`
 CLIBS = `pkg-config --libs json-glib-1.0`
 
-all: process-promise-tracerd.c list.c process.c signal.c perf_va.c config.c syscall_trace.c
+all: process-promise-tracerd.c list.c process.c signal.c perf_va.c config.c syscall_trace.c cache_va.c
 	$(CC) $(CFLAGS) $^ -o process-promise-tracerd $(CLIBS)
 
 install:

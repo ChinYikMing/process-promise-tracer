@@ -3,6 +3,7 @@
 
 #include "list.h"
 #include "config.h"
+#include "cache_va.h"
 #include <limits.h>
 
 #define PROC_SIZE (PAGE_SIZE << 1) // PATH_MAX already occupy a PAGE_SIZE so we have to left shift 1 bit
@@ -20,6 +21,13 @@ typedef struct process {
 	int perf_fd;
 	uint64_t sample_id;
 	void *rb;
+
+	// cache related
+	cacheline **cache;
+	int glob_ref_cnt;
+	int hit_cnt;
+	int miss_cnt;
+	int eviction_cnt;
 } Process;
 
 Process *process_create(int pid);
