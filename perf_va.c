@@ -72,29 +72,20 @@ int perf_event_register(Process *proc, mem_event_t event){
 
 int perf_event_unregister(Process *proc){
 	perf_event_rb_put(proc->rb);
-	int ret = close(proc->perf_fd);
-	assert(0 == ret);
+	close(proc->perf_fd);
 	return 0;
 }
 
-int perf_event_enable(int perf_fd){
-
+int perf_event_start(Process *proc){
+	return ioctl(proc->perf_fd, PERF_EVENT_IOC_ENABLE, 0);
 }
 
-int perf_event_disable(int perf_fd){
-
+int perf_event_stop(Process *proc){
+	return ioctl(proc->perf_fd, PERF_EVENT_IOC_DISABLE, 0);
 }
 
-int perf_event_start(int perf_fd){
-	return ioctl(perf_fd, PERF_EVENT_IOC_ENABLE, 0);
-}
-
-int perf_event_stop(int perf_fd){
-	return ioctl(perf_fd, PERF_EVENT_IOC_DISABLE, 0);
-}
-
-int perf_event_reset(int perf_fd){
-	return ioctl(perf_fd, PERF_EVENT_IOC_RESET, 0);
+int perf_event_reset(Process *proc){
+	return ioctl(proc->perf_fd, PERF_EVENT_IOC_RESET, 0);
 }
 
 void *perf_event_rb_get(int perf_fd, size_t pages){

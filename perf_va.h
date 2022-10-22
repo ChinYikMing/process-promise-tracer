@@ -22,11 +22,10 @@ int perf_event_open(struct perf_event_attr *attr, pid_t pid, int cpu, int group_
 int perf_event_register(Process *proc, mem_event_t event);
 int perf_event_unregister(Process *proc);
 
-int perf_event_enable(int perf_fd);
-int perf_event_disable(int perf_fd);
-int perf_event_start(int perf_fd);
-int perf_event_stop(int perf_fd);
-int perf_event_reset(int perf_fd);
+int perf_event_start(Process *proc);
+int perf_event_stop(Process *proc);
+int perf_event_reset(Process *proc);
+
 void *perf_event_rb_get(int perf_fd, size_t pages);
 void perf_event_rb_put(void *rb);
 

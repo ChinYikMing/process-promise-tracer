@@ -70,6 +70,10 @@ Fd *fd_create(int fd, const char *path){
 	return _fd;
 }
 
+void fd_destroy(Fd *fd){
+	free(fd);
+}
+
 int fdlist_init(List **fdlist){
 	List *tmp= malloc(sizeof(List));
 	if(!tmp)
@@ -79,6 +83,16 @@ int fdlist_init(List **fdlist){
 
 	*fdlist = tmp;
 	return 0;
+}
+
+void fdlist_destroy(List *fdlist){
+	Node *iter;
+	Fd *fd;
+
+	LIST_FOR_EACH(fdlist, iter){
+		fd = LIST_ENTRY(iter, Fd);
+		fd_destroy(fd);
+	}
 }
 
 Node *list_get_node_by_pid(List *list, pid_t pid, bool *pre_exist){
@@ -109,33 +123,47 @@ Node *list_get_node_by_fd(List *list, int _fd){
 	return NULL;
 }
 
-typedef struct mmap_buf {
+typedef struct dev_buf {
         void *start;
         size_t len;
-} Mmapbuf;
+} Devbuf;
 
-Mmapbuf *mmapbuf_create(void *buf_start, size_t buf_len){
-	Mmapbuf *mmapbuf = malloc(sizeof(Mmapbuf));
-	if(!mmapbuf)
+Devbuf *devbuf_create(void *buf_start, size_t buf_len){
+	Devbuf *devbuf = malloc(sizeof(Devbuf));
+	if(!devbuf)
 		return NULL;
 
-	mmapbuf->start = buf_start;
-	mmapbuf->len = buf_len;
-	return mmapbuf;
+	devbuf->start = buf_start;
+	devbuf->len = buf_len;
+	return devbuf;
 }
 
-int mmapbuflist_init(List **mmapbuflist){
+void devbuf_destroy(Devbuf *devbuf){
+	free(devbuf);
+}
+
+int devbuflist_init(List **devbuflist){
 	List *tmp = malloc(sizeof(List));
 	if(!tmp)
 		return 1;
 
 	LIST_INIT(tmp);
 
-	*mmapbuflist = tmp;
+	*devbuflist = tmp;
 	return 0;
 }
 
-bool process_exists(Process *proc){
+void devbuflist_destroy(List *devbuflist){
+	Node *iter;
+	Devbuf *devbuf;
+
+	LIST_FOR_EACH(devbuflist, iter){
+		devbuf = LIST_ENTRY(iter, Devbuf);
+		devbuf_destroy(devbuf);
+	}
+}
+
+bool process_exist(Process *proc){
 	char pid[32] = {0};
 	sprintf(pid, "%d", proc->pid);
 
@@ -153,10 +181,12 @@ bool process_exists(Process *proc){
 	} else { 
 		// opendir other reasons failed
 	}
+
+	return false;
 }
 
 bool process_is_dead(Process *proc){
-	return proc->dead;
+	return !process_exist(proc);
 }
 
 bool process_is_zombie(Process *proc){
@@ -209,7 +239,6 @@ Process *process_create(int pid){
 	proc->flags = 0;
 	memset(proc->exe, 0, sizeof(PATH_MAX));
 	proc->tracer = 0;
-	proc->dead = false;
 
 	// perf related
 	proc->perf_fd = -1;
@@ -222,6 +251,19 @@ Process *process_create(int pid){
 void process_destroy(Process *proc){
 	munmap(proc, PROC_SIZE);
 	return;
+}
+
+void process_clean(Process *proc){
+	fdlist_destroy(proc->fdlist);
+	devbuflist_destroy(proc->devbuflist);
+	proc->pid = -1;
+	proc->state = 'X';
+	proc->flags = 0;
+	memset(proc->exe, 0, sizeof(PATH_MAX));
+	proc->tracer = 0;
+	proc->perf_fd = -1;
+	proc->sample_id = 0;
+	proc->rb = NULL;
 }
 
 void process_updateExe(Process *proc){
@@ -369,7 +411,7 @@ int process_stat(Process *proc){
 	return 0;
 }
 
-void process_syscall_trace_attach(Process *proc, int fd, int syscall){
+void process_syscall_trace_attach(Process *proc, int syscall){
     pid_t pid = proc->pid;
 
     ptrace(PTRACE_ATTACH, pid, NULL, NULL);
@@ -377,7 +419,6 @@ void process_syscall_trace_attach(Process *proc, int fd, int syscall){
     printf("traced pid: %d\n", pid);
 
     _ptrace(PTRACE_SETOPTIONS, pid, NULL, (void*) PTRACE_O_TRACECLONE);
-
     _ptrace(PTRACE_SETOPTIONS, pid, NULL, (void*) PTRACE_O_TRACESYSGOOD);
 
     struct user_regs_struct regs;
@@ -402,16 +443,23 @@ void process_syscall_trace_attach(Process *proc, int fd, int syscall){
         if (_syscall == syscall) {
 	    int _fd = (int) regs.r8;
 
-	    if(_fd == fd){
-		    void *buf_start = (void *) regs.rax;
-		    size_t buf_len = (size_t) regs.rsi;
+	    Node *iter;
+	    Fd *fd;
+	    LIST_FOR_EACH(proc->fdlist, iter){
+		    fd = LIST_ENTRY(iter, Fd);
+		    //printf("fd: %d, path: %s\n", fd->nr, fd->path);
+    
+		    if(0 == strcmp(fd->path, "/dev/video0") && _fd == fd->nr){
+			    void *dev_buf_start = (void *) regs.rax;
+			    size_t dev_buf_len = (size_t) regs.rsi;
 
-		    Mmapbuf *mmapbuf = mmapbuf_create(buf_start, buf_len);
-		    Node *mmapbuf_node = node_create((void *) mmapbuf);
-		    fprintf(stderr, "rax: %p\n", (void *)regs.rax);
-		    fprintf(stderr, "rsi: %lld\n", regs.rsi);
+			    Devbuf *devbuf = devbuf_create(dev_buf_start, dev_buf_len);
+			    Node *devbuf_node = node_create((void *) devbuf);
+			    fprintf(stderr, "rax: %p\n", (void *)regs.rax);
+			    fprintf(stderr, "rsi: %lld\n", regs.rsi);
 
-		    list_push_back(proc->mmapbuflist, mmapbuf_node);
+			    list_push_back(proc->devbuflist, devbuf_node);
+		    }
 	    }
 
             /*
@@ -427,14 +475,13 @@ void process_syscall_trace_attach(Process *proc, int fd, int syscall){
         }
     }
 	
+    _ptrace(PTRACE_DETACH, proc->pid, 0, 0);
 }
 
 // skip pid of repeat if 'repeat' in /proc/[pid]/task directory since it is same as [pid]
 void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, Config *cf){ 
     DIR *scan_dir = opendir(dir);
     DIRent *entry;
-    Stat statbuf;
-    mode_t mode;
 
     if(!scan_dir){ // finish scanning of /proc or /proc/[pid]/task
 	return;
@@ -516,7 +563,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 			proc->tracer = child;
 
 			fdlist_init(&proc->fdlist);
-			mmapbuflist_init(&proc->mmapbuflist);
+			devbuflist_init(&proc->devbuflist);
 
 			while(1){
 				sleep(1);
@@ -525,38 +572,24 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 				process_updateFdList(proc);
 
 				// get mmap syscall info
-				Node *iter;
-				Fd *fd;
-				LIST_FOR_EACH(proc->fdlist, iter){
-					fd = LIST_ENTRY(iter, Fd);
-					printf("fd: %d, path: %s\n", fd->nr, fd->path);
-
-					if(0 == strcmp(fd->path, "/dev/video0")){
-						process_syscall_trace_attach(proc, fd->nr, SYS_mmap); 
-
-						/*
-						Node *iter2;
-						Mmapbuf *mmapbuf;
-						LIST_FOR_EACH(proc->mmapbuflist, iter2){
-							mmapbuf = LIST_ENTRY(iter2, Mmapbuf);
-							printf("buf start: %p, buf len: %zu\n", mmapbuf->start, mmapbuf->len);
-						}
-						*/
-					}
-				}
+				process_syscall_trace_attach(proc, SYS_mmap); 
 
 				if(process_is_dead(proc)){
+					perf_event_stop(proc);
 					perf_event_unregister(proc);
-					printf("child exit\n");
+					process_clean(proc);
+					printf("tracee exit\n");
 					_exit(EXIT_SUCCESS);
 				}
 				
 				// perf sampling address here
 				int ret;
-				ret = perf_event_register(proc, ALL_LOADS);
-				assert(0 == ret);
+				if(-1 == proc->perf_fd){
+					ret = perf_event_register(proc, ALL_LOADS);
+					assert(0 == ret);
+				}
 
-				perf_event_start(proc->perf_fd);
+				perf_event_start(proc);
 
 				va_sample_t va_sample;
 				while(true){
@@ -579,12 +612,8 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		}
 	} else { // exist before
 		if(!process_is_zombie(proc)){
-			if(!process_exists(proc)){ // check process if exists in /proc
-				proc->dead = 1; // inform child the tracee is dead
-			} else {
-				process_updateExe(proc); // pid might be reused, then the exe could change, such as calling execve series function
-				printf("pid: %d, state: %c, new_exe: %s\n", proc->pid, proc->state, proc->exe);
-			}
+			process_updateExe(proc); // pid might be reused, then the exe could change, such as calling execve series function
+			printf("pid: %d, state: %c, new_exe: %s\n", proc->pid, proc->state, proc->exe);
 		}
 	}
     }

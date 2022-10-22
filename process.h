@@ -8,14 +8,13 @@
 #define PROC_SIZE (PAGE_SIZE << 1) // PATH_MAX already occupy a PAGE_SIZE so we have to left shift 1 bit
 
 typedef struct process {
-	pid_t pid;
-	char state; // running, sleeping in an interruptible wait, waiting in uninterruptible disk sleep, zombie, stopped
+	pid_t pid;       // -1 is dead
+	char state;      // running, sleeping in an interruptible wait, waiting in uninterruptible disk sleep, zombie, stopped
 	uint32_t flags;  // currently used for detecting if is a kernel thread and skip tracing it because normally kernel threads are safe
 	char exe[PATH_MAX];
 	pid_t tracer;
-	bool dead;
 	List *fdlist;
-	List *mmapbuflist;
+	List *devbuflist;
 
 	// perf related
 	int perf_fd;
