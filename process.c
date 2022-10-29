@@ -40,13 +40,13 @@ struct data *data_new(char* val1, char* val2){
 
 bool process_promise_pass(Process *proc){
 
-    Elf64_Ehdr  *elf;
+    	Elf64_Ehdr  *elf;
 	Elf64_Shdr  *shdr;
 
 	int fd = open(proc->exe, O_RDONLY);
 	int filesize = lseek(fd,0,SEEK_END);
 	uint8_t* data = mmap(NULL, filesize, PROT_READ, MAP_SHARED, fd, 0);
-	
+
 	elf = (Elf64_Ehdr *) data;
 	shdr = (Elf64_Shdr *) (data + elf->e_shoff);
 	char* strtab = (char *)(data + shdr[elf->e_shstrndx].sh_offset);
@@ -63,61 +63,61 @@ bool process_promise_pass(Process *proc){
 		    fprintf(fp,"%c", data[k]);
 		}   
 		fclose(fp);
-    	}
-	
+	}
+
 	close(fd);
 	munmap(data, filesize);
 
 
 	char* json;
-    struct json_object* obj;
-    int fd1 = open("file.json", O_RDONLY); //file.json
-    int fs = lseek(fd1,0,SEEK_END);
-    json = mmap(NULL, fs, PROT_READ, MAP_PRIVATE, fd1, 0);
-    close(fd1);
+	struct json_object* obj;
+	int fd1 = open("file.json", O_RDONLY); //file.json
+	int fs = lseek(fd1,0,SEEK_END);
+	json = mmap(NULL, fs, PROT_READ, MAP_PRIVATE, fd1, 0);
+	close(fd1);
 
 	device_list_init(&proc->device_list);
 	access_file_list_init(&proc->access_file_list);
 
-    obj = json_tokener_parse(json);
-    if_parse_error(obj, proc);
+	obj = json_tokener_parse(json);
+	if_parse_error(obj, proc);
 
-    struct json_object* device = json_object_object_get(obj, "device");
-    if_parse_error(device, proc);
-    int len = json_object_array_length(device);
+	struct json_object* device = json_object_object_get(obj, "device");
+	if_parse_error(device, proc);
+	int len = json_object_array_length(device);
 	Node *node;
 	struct data *d;
-    for(int i=0;i<len;i++)
-    {
-        struct json_object* jvalue = json_object_array_get_idx(device, i);
-        struct json_object* device_i = json_object_object_get(jvalue, "device");
-        struct json_object* mask = json_object_object_get(jvalue, "action_mask");
-        if_parse_error(device_i, proc);
-        if_parse_error(mask, proc);  
-        char* device_ = json_object_get_string(device_i);
-        char* mask_ = json_object_get_string(mask);
+	for(int i=0;i<len;i++)
+	{
+		struct json_object* jvalue = json_object_array_get_idx(device, i);
+		struct json_object* device_i = json_object_object_get(jvalue, "device");
+		struct json_object* mask = json_object_object_get(jvalue, "action_mask");
+		if_parse_error(device_i, proc);
+		if_parse_error(mask, proc);  
+		char* device_ = json_object_get_string(device_i);
+		char* mask_ = json_object_get_string(mask);
 		d = data_new(device_, mask_);
 		node = node_create(d);
 		list_push_back(proc->device_list, node);
-    }
+	}
 
-    struct json_object* files = json_object_object_get(obj, "files");
-    if_parse_error(files, proc);
-    len = json_object_array_length(files);
-    for(int i=0; i<len; i++)
-    {
-        struct json_object* jvalue = json_object_array_get_idx(files, i);
-        struct json_object* file_name = json_object_object_get(jvalue, "file_name");
-        struct json_object* type = json_object_object_get(jvalue, "type");
-        if_parse_error(file_name, proc);
-        if_parse_error(type, proc);
-        char* file_name_ = json_object_get_string(file_name);
-        char* type_ = json_object_get_string(type);
-        d = data_new(file_name_, type_);
+	struct json_object* files = json_object_object_get(obj, "files");
+	if_parse_error(files, proc);
+	len = json_object_array_length(files);
+	for(int i=0; i<len; i++)
+	{
+		struct json_object* jvalue = json_object_array_get_idx(files, i);
+		struct json_object* file_name = json_object_object_get(jvalue, "file_name");
+		struct json_object* type = json_object_object_get(jvalue, "type");
+		if_parse_error(file_name, proc);
+		if_parse_error(type, proc);
+		char* file_name_ = json_object_get_string(file_name);
+		char* type_ = json_object_get_string(type);
+		d = data_new(file_name_, type_);
 		node = node_create(d);
 		list_push_back(proc->access_file_list, node);
-    }
-
+	}
+	munmap(json, fs);
 	return true;
 }
 int device_list_init(List** device_list)
