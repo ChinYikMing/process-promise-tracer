@@ -1,7 +1,6 @@
 #include "basis.h"
 #include "list.h"
 #include "process.h"
-#include "syscall_trace.h"
 #include "signal.h"
 #include "perf_va.h"
 #include "perf_mem_event.h"
@@ -133,17 +132,17 @@ Node *list_get_node_by_fd(List *list, int _fd){
 	return NULL;
 }
 
-typedef struct dev_buf {
-        void *start;
+typedef struct devbuf {
+        char start[16];
         size_t len;
 } Devbuf;
 
-Devbuf *devbuf_create(void *buf_start, size_t buf_len){
+Devbuf *devbuf_create(const char *buf_start, size_t buf_len){
 	Devbuf *devbuf = malloc(sizeof(Devbuf));
 	if(!devbuf)
 		return NULL;
 
-	devbuf->start = buf_start;
+	strcpy(devbuf->start, buf_start);
 	devbuf->len = buf_len;
 	return devbuf;
 }
@@ -299,6 +298,64 @@ void process_updateExe(Process *proc){
 	}
 }
 
+/*
+ * return 0 if not match device buffer, else match
+ */
+int parse_maps_line(const char *maps_line, char *devbuf_start, size_t *devbuf_len){
+	if(strstr(maps_line, "/dev/video")){
+		char *minus = strchr(maps_line, '-');
+		char *space = strchr(maps_line, ' ');
+		char start[16] = {0};
+		char end[16] = {0};
+
+		strncpy(start, maps_line, minus - maps_line);
+		strncpy(end, minus + 1, space - (minus + 1));
+		
+		uint64_t start_num, end_num; 
+		start_num = strtoll(start, NULL, 16);
+		end_num = strtoll(end, NULL, 16);
+
+		strncpy(devbuf_start, start, minus - maps_line);
+		*devbuf_len  = end_num - start_num;
+		return 1;
+	}
+	return 0;
+}
+
+void process_updateDevBufList(Process *proc){
+	char pid[32] = {0};
+	sprintf(pid, "%d", proc->pid);
+
+	char maps_file[32] = {0};
+	strcpy(maps_file, PROC_DIR);
+	strcat(maps_file, "/");
+	strcat(maps_file, pid);
+	strcat(maps_file, "/");
+	strcat(maps_file, "maps");
+
+        FILE *maps = fopen(maps_file, "r");
+        if(!maps){
+	   return;
+        }
+
+	char maps_line[BUF_SIZE];
+	char devbuf_start[BUF_SIZE];
+	size_t devbuf_len;
+	int ret;
+	while(fgets(maps_line, BUF_SIZE, maps)){
+		ret = parse_maps_line(maps_line, devbuf_start, &devbuf_len);
+		if(ret){
+			Devbuf *devbuf = devbuf_create(devbuf_start, devbuf_len);
+	                Node *devbuf_node = node_create((void *) devbuf);
+
+		        //fprintf(stderr, "debbuf_start: %s\n", devbuf_start);
+
+                        list_push_back(proc->devbuflist, devbuf_node);
+		}
+	}
+	fclose(maps);
+}
+
 void process_updateFdList(Process *proc){
 	char pid[32] = {0};
 	sprintf(pid, "%d", proc->pid);
@@ -425,73 +482,6 @@ int process_stat(Process *proc){
 	return 0;
 }
 
-void process_syscall_trace_attach(Process *proc, int syscall){
-    pid_t pid = proc->pid;
-
-    ptrace(PTRACE_ATTACH, pid, NULL, NULL);
-    fprintf(stderr, " [TRACE] Attached to process. Ok. \n");
-    printf("traced pid: %d\n", pid);
-
-    _ptrace(PTRACE_SETOPTIONS, pid, NULL, (void*) PTRACE_O_TRACECLONE);
-    _ptrace(PTRACE_SETOPTIONS, pid, NULL, (void*) PTRACE_O_TRACESYSGOOD);
-
-    struct user_regs_struct regs;
-    fprintf(stderr, " [TRACE] Start event loop. Ok. \n");
-    for(;;) {
-        // Intercept system call entry 
-        if (ptrace_wait_syscall(pid) == TERMINATED) {
-            fprintf(stderr, " [TRACE] (1) Monitored process has terminated. \n");
-            break;
-        }
-
-        // Intercept system call exit 
-        if (ptrace_wait_syscall(pid) == TERMINATED) {
-            fprintf(stderr, " [TRACE] (2) Monitored process has terminated. \n");
-            break;
-        }
-
-        _ptrace(PTRACE_GETREGS, pid, NULL, &regs);
-
-        // Get system call number
-        int _syscall = regs.orig_rax;
-        if (_syscall == syscall) {
-	    int _fd = (int) regs.r8;
-
-	    Node *iter;
-	    Fd *fd;
-	    LIST_FOR_EACH(proc->fdlist, iter){
-		    fd = LIST_ENTRY(iter, Fd);
-		    //printf("fd: %d, path: %s\n", fd->nr, fd->path);
-    
-		    if(0 == strcmp(fd->path, "/dev/video0") && _fd == fd->nr){
-			    void *dev_buf_start = (void *) regs.rax;
-			    size_t dev_buf_len = (size_t) regs.rsi;
-
-			    Devbuf *devbuf = devbuf_create(dev_buf_start, dev_buf_len);
-			    Node *devbuf_node = node_create((void *) devbuf);
-			    fprintf(stderr, "rax: %p\n", (void *)regs.rax);
-			    fprintf(stderr, "rsi: %lld\n", regs.rsi);
-
-			    list_push_back(proc->devbuflist, devbuf_node);
-		    }
-	    }
-
-            /*
-            fprintf(stderr, "rax: %p\n", (void *)regs.rax);
-            fprintf(stderr, "rdi: %lld\n", regs.rdi);
-            fprintf(stderr, "rsi: %lld\n", regs.rsi);
-            fprintf(stderr, "rdx: %lld\n", regs.rdx);
-            fprintf(stderr, "r10: %lld\n", regs.r10);
-            fprintf(stderr, "r8 : %lld\n", regs.r8);
-            fprintf(stderr, "r9 : %lld\n", regs.r9);
-	    */
-            continue;
-        }
-    }
-	
-    _ptrace(PTRACE_DETACH, proc->pid, 0, 0);
-}
-
 // skip pid of repeat if 'repeat' in /proc/[pid]/task directory since it is same as [pid]
 void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, Config *cf){ 
     DIR *scan_dir = opendir(dir);
@@ -610,8 +600,8 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 				// read process open fd list( read here because malloc memory cannot be shared with child )
 				process_updateFdList(proc);
 
-				// get mmap syscall info
-				//process_syscall_trace_attach(proc, SYS_mmap); 
+				// get device mmap buffer list
+				process_updateDevBufList(proc);
 
 				if(process_is_dead(proc)){
 					perf_event_stop(proc);
@@ -625,6 +615,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 				// perf sampling address here
 				if(-1 == proc->perf_fd){
 					ret = perf_event_register(proc, ALL_LOADS);
+					//ret = perf_event_register(proc, ALL_STORES);
 					assert(0 == ret);
 					perf_event_start(proc);
 				}
@@ -650,10 +641,13 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 						_exit(EXIT_FAILURE);
 					} else {
 					    if(va_sample.buf_addr >= 0x7fffee0f9000 && va_sample.buf_addr <= 0x7fffee3e7000) {
+					    //if(va_sample.buf_addr >= 0x7fffec6b7000 && va_sample.buf_addr <= 0x7fffec9a5000) {
 						    memset(expr, 0, 32);
 						    sprintf(expr, "L %lx", va_sample.buf_addr);
 						    cache_virtaddr(proc, set_bit, assoc, block_bit, expr);
+						    //printf("addr: 0x%lx\n", va_sample.buf_addr);
 					    }
+					    //printf("addr: 0x%lx\n", va_sample.buf_addr);
 
 					    /*
 					    printf("pid: %u, tid: %u, buf address: 0x%lx\n",
