@@ -12,14 +12,14 @@
 #include <sys/syscall.h>
 #include <json-c/json.h>
 
-void if_parse_error(struct json_object* obj, Process *proc)
+bool if_parse_error(struct json_object* obj, Process *proc)
 {
     if(obj == NULL)
     {
-        write(0, "JSON file error\n", strlen("JSON file error\n")); 
-        kill(proc->exe, SIGSTOP);
+        send_signal(proc, SIGSTOP, "JSON file error\n");
+		return false;
     }
-
+	return true;
 }
 
 struct data {
@@ -79,10 +79,13 @@ bool process_promise_pass(Process *proc){
 	access_file_list_init(&proc->access_file_list);
 
 	obj = json_tokener_parse(json);
-	if_parse_error(obj, proc);
+
+	if(!if_parse_error(obj, proc))
+		return false;
 
 	struct json_object* device = json_object_object_get(obj, "device");
-	if_parse_error(device, proc);
+	if(!if_parse_error(device, proc))
+		return false;
 	int len = json_object_array_length(device);
 	Node *node;
 	struct data *d;
@@ -91,8 +94,8 @@ bool process_promise_pass(Process *proc){
 		struct json_object* jvalue = json_object_array_get_idx(device, i);
 		struct json_object* device_i = json_object_object_get(jvalue, "device");
 		struct json_object* mask = json_object_object_get(jvalue, "action_mask");
-		if_parse_error(device_i, proc);
-		if_parse_error(mask, proc);  
+		if(!if_parse_error(device_i, proc) || !if_parse_error(mask, proc))
+			return false;
 		char* device_ = json_object_get_string(device_i);
 		char* mask_ = json_object_get_string(mask);
 		d = data_new(device_, mask_);
@@ -101,15 +104,16 @@ bool process_promise_pass(Process *proc){
 	}
 
 	struct json_object* files = json_object_object_get(obj, "files");
-	if_parse_error(files, proc);
+	if(!if_parse_error(files, proc))
+		return false;
 	len = json_object_array_length(files);
 	for(int i=0; i<len; i++)
 	{
 		struct json_object* jvalue = json_object_array_get_idx(files, i);
 		struct json_object* file_name = json_object_object_get(jvalue, "file_name");
 		struct json_object* type = json_object_object_get(jvalue, "type");
-		if_parse_error(file_name, proc);
-		if_parse_error(type, proc);
+		if(!if_parse_error(file_name, proc) || !if_parse_error(type, proc))
+			return false;
 		char* file_name_ = json_object_get_string(file_name);
 		char* type_ = json_object_get_string(type);
 		d = data_new(file_name_, type_);
