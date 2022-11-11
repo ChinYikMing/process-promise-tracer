@@ -5,6 +5,7 @@
 #include "perf_va.h"
 #include "perf_mem_event.h"
 #include "cache_va.h"
+#include "log.h"
 #include <libelf.h>
 #include <sys/mman.h>
 #include <sys/reg.h>
@@ -660,6 +661,11 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 	}
 
 	if(!pre_exist){
+#ifdef DAEMON
+		log_open();
+		syslog(LOG_NOTICE, LOG_PREFIX"new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
+		log_close();
+#endif
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
 
 		pid_t child = fork();
