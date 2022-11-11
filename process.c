@@ -293,6 +293,10 @@ bool process_is_dead(Process *proc){
 	return !process_exist(proc);
 }
 
+bool process_is_stop(Process *proc){
+	return proc->state == 'T';
+}
+
 bool process_is_zombie(Process *proc){
 	return proc->state == 'Z';
 }
@@ -634,6 +638,9 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 
 	scan_proc_dir(list, pid_path, proc, period, cf);
 
+	if(process_is_stop(proc))
+		continue;
+
 	if(process_is_kernel_thread(proc)){
 		process_destroy(proc);
 		node_destroy(proc_node);
@@ -646,13 +653,11 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		continue;
 	}
 
-	/*
 	if(!process_promise_pass(proc)){
 		process_destroy(proc);
 		node_destroy(proc_node);
 		continue;
 	}
-	*/
 
 	if(!pre_exist){
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
