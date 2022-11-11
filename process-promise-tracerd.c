@@ -9,17 +9,6 @@ int main(int argc, char **argv){
 	if(argc == 2 && strcmp(argv[1], "-c") == 0) // co-operate with systemd service file
 		exit(config_parse(CONFIG_FILE));
 
-#ifdef DAEMON
-	int nochdir = 0;
-	int noclose = 0;
-	if(daemon(nochdir, noclose)){
-		log_open();
-		syslog(LOG_ERR, LOG_PREFIX"daemonized failed");
-		log_close();
-		exit(1);
-	}
-#endif
-
 	Config config;
 	config_init(&config);
 	config_read(&config, CONFIG_FILE);
@@ -42,6 +31,7 @@ int main(int argc, char **argv){
 		if(sighup_coming){
 			sighup_coming = 0;
 			config_read(&config, CONFIG_FILE);
+			printf("recerived signal!\n");
 		}
 
 		scan_proc_dir(proc_list, PROC_DIR, NULL, 0.5, &config);
