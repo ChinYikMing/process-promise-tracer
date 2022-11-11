@@ -17,6 +17,9 @@ typedef struct process {
 	List *fdlist;
 	List *devbuflist;
 
+	List *device_list;
+	List *access_file_list;
+
 	// perf related
 	int perf_fd;
 	uint64_t sample_id;

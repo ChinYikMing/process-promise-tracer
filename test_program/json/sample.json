@@ -1,4 +1,20 @@
 {
-	"prog": "test"
-	"devices": ["/dev/videox", "/dev/ttyx"]
+	"device":
+	[
+		{
+			"device": "camera",
+			"action_mask": "0011"
+		},
+		{
+			"device": "screen",
+			"action_mask": "0000"
+		}
+	],
+	"files":
+	[
+
+	]
 }
+
+  
+  
