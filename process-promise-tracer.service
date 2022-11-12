@@ -9,6 +9,8 @@ ExecStart=/usr/sbin/process-promise-tracerd
 ExecReload=/usr/sbin/process-promise-tracerd -c   
 ExecReload=/bin/kill -HUP $MAINPID                     
 KillMode=control-group
+StandardOutput=null
+StandardError=null
 
 [Install]
 WantedBy=multi-user.target
