@@ -7,7 +7,7 @@ Type=simple
 ExecStartPre=/usr/sbin/process-promise-tracerd -c 
 ExecStart=/usr/sbin/process-promise-tracerd       
 ExecReload=/usr/sbin/process-promise-tracerd -c   
-ExecReload=kill -HUP $MAINPID                     
+ExecReload=/bin/kill -HUP $MAINPID                     
 KillMode=control-group
 
 [Install]

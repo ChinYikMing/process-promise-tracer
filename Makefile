@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -g -Wall `pkg-config --cflags json-c` #-DDAEMON
+CFLAGS = -g -Wall `pkg-config --cflags json-c` -DDAEMON
 CLIBS = `pkg-config --libs json-c`
 
 all: process-promise-tracerd.c list.c process.c signal.c perf_va.c config.c cache_va.c log.c
@@ -16,8 +16,14 @@ install:
 	#rsyslogd installation
 	cp process-promise-tracerd.log.conf /etc/rsyslog.d/process-promise-tracerd.conf
 	systemctl restart rsyslog
+	#logrotated installation
+	cp process-promise-tracerd.logrotate.conf /etc/logrotate.d/process-promise-tracerd
+	systemctl restart logrotate
 
 uninstall:
+	#logrotated uninstallation
+	rm /etc/logrotate.d/process-promise-tracerd
+	systemctl restart logrotate
 	#rsyslogd uninstallation
 	rm /etc/rsyslog.d/process-promise-tracerd.conf
 	systemctl restart rsyslog

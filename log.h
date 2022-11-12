@@ -23,7 +23,7 @@ void log_close(void);
  *
  *      arguments are optional depends on format of message
  *      
- *      For usage example, you could refer to process-promise-tracerd.c
+ *      For usage example, you could refer to process.c
  */
 
 #endif
