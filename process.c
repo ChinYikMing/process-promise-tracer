@@ -1,9 +1,13 @@
 #include "basis.h"
+#include <pthread.h>
 #include "list.h"
 #include "process.h"
+#include <poll.h>
 #include "signal.h"
+#include "perf_sampling.h"
 #include "perf_va.h"
-#include "perf_mem_event.h"
+#include "perf_trp.h"
+#include "perf_event.h"
 #include "cache_va.h"
 #include "log.h"
 #include <libelf.h>
@@ -12,6 +16,26 @@
 #include <sys/user.h>
 #include <sys/syscall.h>
 #include <json-c/json.h>
+
+/*
+// cache L3
+int set_bit = 13;
+int assoc = 12;
+int block_bit = 6;
+int set_bit = 13; // 6
+*/
+
+/*
+// cache L1
+int assoc = 8;
+int block_bit = 6;
+int set_bit = 6;
+int set_size = 1 << set_bit;
+*/
+int assoc = 8;
+int block_bit = 20;
+int set_bit = 6;
+int set_size = 1 << 6; // 6 is set_bit
 
 bool if_parse_error(struct json_object* obj, Process *proc)
 {
@@ -181,6 +205,17 @@ int fdlist_init(List **fdlist){
 	return 0;
 }
 
+int perffdlist_init(List **perffdlist){
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	*perffdlist = tmp;
+	return 0;
+}
+
 void fdlist_destroy(List *fdlist){
 	Node *iter;
 	Fd *fd;
@@ -232,6 +267,10 @@ typedef struct devbuf {
         char start[16];
         size_t len;
 } Devbuf;
+
+uint64_t str2uint64(const char *str){
+	return strtoull(str, NULL, 16);
+}
 
 Devbuf *devbuf_create(const char *buf_start, size_t buf_len){
 	Devbuf *devbuf = malloc(sizeof(Devbuf));
@@ -350,9 +389,7 @@ Process *process_create(int pid){
 	proc->tracer = 0;
 
 	// perf related
-	proc->perf_fd = -1;
-	proc->sample_id = 0;
-	proc->rb = NULL;
+	proc->perf_fdlist = NULL;
 
 	return proc;
 }
@@ -370,9 +407,10 @@ void process_clean(Process *proc){
 	proc->flags = 0;
 	memset(proc->exe, 0, sizeof(PATH_MAX));
 	proc->tracer = 0;
-	proc->perf_fd = -1;
-	proc->sample_id = 0;
-	proc->rb = NULL;
+	proc->perf_fdlist = NULL;
+	proc->devbuflist = NULL;
+	proc->device_list = NULL;
+	proc->access_file_list = NULL;
 	proc->cache = NULL;
 	proc->hit_cnt = 0;
 	proc->miss_cnt = 0;
@@ -412,10 +450,11 @@ int parse_maps_line(const char *maps_line, char *devbuf_start, size_t *devbuf_le
 		strncpy(end, minus + 1, space - (minus + 1));
 		
 		uint64_t start_num, end_num; 
-		start_num = strtoll(start, NULL, 16);
-		end_num = strtoll(end, NULL, 16);
+		start_num = strtoull(start, NULL, 16);
+		end_num = strtoull(end, NULL, 16);
 
-		strncpy(devbuf_start, start, minus - maps_line);
+		strcpy(devbuf_start, "0x");
+		strncat(devbuf_start, start, minus - maps_line);
 		*devbuf_len  = end_num - start_num;
 		return 1;
 	}
@@ -582,6 +621,128 @@ int process_stat(Process *proc){
 	return 0;
 }
 
+static void get_va_sample_from_sample(va_sample_t *va_sample, sample_t *sample){
+	va_sample->pid = sample->pid;
+	va_sample->tid = sample->tid;
+	va_sample->buf_addr = sample->addr;
+	return;
+}
+
+static void get_trp_sample_from_sample(trp_sample_t *trp_sample, sample_t *sample){
+	trp_sample->ip = sample->ip;
+	trp_sample->pid = sample->pid;
+	trp_sample->tid = sample->tid;
+	trp_sample->time = sample->time;
+	trp_sample->cpu = sample->res;
+	trp_sample->period = sample->period;
+	trp_sample->size = sample->size;
+	memcpy(trp_sample->data, sample->data, sample->size);
+	return;
+}
+
+typedef struct thread_data {
+	Process *proc;    // to get pid
+	Perf_fd *perf_fd; // to get sample_id and rb
+} pthread_data_t;
+
+void *load_evt_monitoring(void *arg){
+	pthread_data_t *thread_data = (pthread_data_t *) arg;
+	Process *proc = (Process *) thread_data->proc;
+	Perf_fd *perf_fd = (Perf_fd *) thread_data->perf_fd;
+
+	int ret;
+	sample_t sample;
+	va_sample_t va_sample;
+	char expr[32];
+	uint64_t addr_start, addr_end;
+
+	while(true){
+		usleep(10000);
+		//sleep(1);
+
+		ret = perf_event_rb_read(proc, perf_fd, &sample);
+		if(-EAGAIN == ret){
+		    continue;
+		} else if(ret < 0){
+			break;
+			//_exit(EXIT_FAILURE);
+		}
+
+		get_va_sample_from_sample(&va_sample, &sample);
+
+		Node *iter;
+		Devbuf *devbuf;
+		List *devbuf_list = proc->devbuflist;
+
+		LIST_FOR_EACH(devbuf_list, iter){
+			devbuf = LIST_ENTRY(iter, Devbuf);
+			addr_start = str2uint64(devbuf->start);
+			addr_end = addr_start + devbuf->len;
+
+			if(va_sample.buf_addr >= addr_start && va_sample.buf_addr <= addr_end) {
+				 memset(expr, 0, 32);
+				 sprintf(expr, "L %lx", va_sample.buf_addr);
+				 cache_virtaddr(proc, set_bit, assoc, block_bit, expr);
+				 //printf("addr: 0x%lx\n", va_sample.buf_addr);
+			}
+		}
+	}
+}
+
+void *trp_monitoring(void *arg){
+	pthread_data_t *thread_data = (pthread_data_t *) arg;
+	Process *proc = (Process *) thread_data->proc;
+	Perf_fd *perf_fd = (Perf_fd *) thread_data->perf_fd;
+
+	sample_t sample;
+	trp_sample_t trp_sample;
+	char *ptr;
+	int ret;
+	struct pollfd pfd;
+	pfd.fd = perf_fd->fd;
+	pfd.events = POLLIN|POLLERR|POLLHUP;
+
+	while(true){
+		ret = poll(&pfd, 1, -1);
+		if(ret < 0){
+			printf("poll failed\n");
+			break;
+		}
+
+		if(pfd.revents & POLLIN){
+			ret = perf_event_rb_read(proc, perf_fd, &sample);
+
+			if(ret == -EAGAIN){
+				usleep(10000);
+				//sleep(1);
+				continue;
+			} else if(ret < 0){
+				break;
+				//_exit(EXIT_FAILURE);
+			}
+
+			get_trp_sample_from_sample(&trp_sample, &sample);
+
+			ptr = ((char *) trp_sample.data) + 16;
+			printf("timestamp: %lx, pid: %d, size: %u, (fd: %zu", trp_sample.time, trp_sample.pid, trp_sample.size, *((unsigned long *) ptr));
+			ptr = ((char *) ptr) + sizeof(unsigned long);
+			printf(", buf: %p", *((unsigned long *) ptr));
+			ptr = ((char *) ptr) + sizeof(unsigned long);
+			printf(", byte: %ld)\n", *((unsigned long *) ptr));
+		}
+
+		if(pfd.revents & POLLHUP){                  // perf fd is not valid or disconnected
+			//printf("%d poll hup\n", pfd.fd);
+			break;
+		}
+
+		if(pfd.revents & POLLERR){                    
+			//printf("%d poll err\n", pfd.fd);
+			break;
+		}
+	}
+}
+
 // skip pid of repeat if 'repeat' in /proc/[pid]/task directory since it is same as [pid]
 void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, Config *cf){ 
     DIR *scan_dir = opendir(dir);
@@ -666,6 +827,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		syslog(LOG_NOTICE, LOG_PREFIX"new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
 		log_close();
 #endif
+
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
 
 		pid_t child = fork();
@@ -674,93 +836,67 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 
 			fdlist_init(&proc->fdlist);
 			devbuflist_init(&proc->devbuflist);
+			perffdlist_init(&proc->perf_fdlist);
 
 			int ret;
-			va_sample_t va_sample;
-			char expr[32];
 
-			/*
-			// cache L3
-			int set_bit = 13;
-			int assoc = 12;
-			int block_bit = 6;
-			int set_bit = 13; // 6
-			*/
-
-			/*
-			// cache L1
-			int assoc = 8;
-			int block_bit = 6;
-			int set_bit = 6;
-			int set_size = 1 << set_bit;
-			*/
-			int assoc = 8;
-			int block_bit = 20;
-			int set_bit = 6;
-			int set_size = 1 << set_bit;
 			cache_init(&proc->cache, set_size, assoc);
+			Perf_fd *perf_fd1, *perf_fd2;
 
-			while(1){
+			// read process open fd list( read here because malloc memory cannot be shared with child )
+			process_updateFdList(proc);
+
+			// get device mmap buffer list
+			process_updateDevBufList(proc);
+
+			perf_fd1 = perf_event_register(proc, PERF_TYPE_RAW, ALL_LOADS, PERF_SAMPLE_IDENTIFIER | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR |
+										    PERF_SAMPLE_IP | PERF_SAMPLE_TIME | PERF_SAMPLE_CPU | PERF_SAMPLE_PERIOD | PERF_SAMPLE_RAW);
+			assert(perf_fd1 != NULL);
+			perf_fd2 = perf_event_register(proc, PERF_TYPE_TRACEPOINT, SYSCALL_WRITE, PERF_SAMPLE_IDENTIFIER|PERF_SAMPLE_IP| PERF_SAMPLE_ADDR |
+												PERF_SAMPLE_TID|PERF_SAMPLE_TIME|PERF_SAMPLE_CPU|PERF_SAMPLE_PERIOD|PERF_SAMPLE_RAW);
+			assert(perf_fd2 != NULL);
+			
+			// perf sampling load address thread, here is all load event
+			pthread_t thr1;
+			pthread_data_t thr_data1;
+			thr_data1.proc = proc;
+			thr_data1.perf_fd = perf_fd1;
+			ret = pthread_create(&thr1, NULL, load_evt_monitoring, (void *) &thr_data1);
+			if(ret != 0)
+				handle_error("load event monitor created failed\n");
+			ret = pthread_detach(thr1);
+			if(ret != 0)
+				handle_error("detach load event monitor failed\n");
+
+			// perf sampling tracepoints thread, here is sys_enter_write
+			pthread_t thr2;
+			pthread_data_t thr_data2;
+			thr_data2.proc = proc;
+			thr_data2.perf_fd = perf_fd2;
+			ret = pthread_create(&thr2, NULL, trp_monitoring, (void *) &thr_data2);
+			if(ret != 0)
+				handle_error("tracepoint monitor created failed\n");
+			ret = pthread_detach(thr2);
+			if(ret != 0)
+				handle_error("detach tracepoint monitor failed\n");
+
+			perf_event_start(proc);
+
+			while(true){
 				sleep(1);
 
-				// read process open fd list( read here because malloc memory cannot be shared with child )
 				process_updateFdList(proc);
-
-				// get device mmap buffer list
 				process_updateDevBufList(proc);
-
+			
 				if(process_is_dead(proc)){
 					perf_event_stop(proc);
-					perf_event_unregister(proc);
+					//perf_event_unregister(proc);
 					printSummary(proc->hit_cnt, proc->miss_cnt, proc->eviction_cnt);
 					process_clean(proc);
 					printf("tracee exit\n");
 					_exit(EXIT_SUCCESS);
 				}
-				
-				// perf sampling address here
-				if(-1 == proc->perf_fd){
-					ret = perf_event_register(proc, ALL_LOADS);
-					//ret = perf_event_register(proc, ALL_STORES);
-					assert(0 == ret);
-					perf_event_start(proc);
-				}
 
-				while(true){
-					if(process_is_dead(proc)){
-						perf_event_stop(proc);
-						perf_event_unregister(proc);
-						printSummary(proc->hit_cnt, proc->miss_cnt, proc->eviction_cnt);
-						process_clean(proc);
-						printf("tracee exit\n");
-						_exit(EXIT_SUCCESS);
-					}
-
-					ret = perf_event_rb_read(proc, &va_sample);
-
-					if(-EAGAIN == ret)
-					{
-					    usleep(10000);
-					    continue;
-					}
-					else if(ret < 0){
-						_exit(EXIT_FAILURE);
-					} else {
-					    if(va_sample.buf_addr >= 0x7fffee0f9000 && va_sample.buf_addr <= 0x7fffee3e7000) {
-					    //if(va_sample.buf_addr >= 0x7fffec6b7000 && va_sample.buf_addr <= 0x7fffec9a5000) {
-						    memset(expr, 0, 32);
-						    sprintf(expr, "L %lx", va_sample.buf_addr);
-						    cache_virtaddr(proc, set_bit, assoc, block_bit, expr);
-						    //printf("addr: 0x%lx\n", va_sample.buf_addr);
-					    }
-					    //printf("addr: 0x%lx\n", va_sample.buf_addr);
-
-					    /*
-					    printf("pid: %u, tid: %u, buf address: 0x%lx\n",
-						  va_sample.pid, va_sample.tid, va_sample.buf_addr);
-						  */
-					}
-				}
 			}
 		} else {
 			list_push_back(list, proc_node);

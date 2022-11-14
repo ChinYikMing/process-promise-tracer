@@ -21,9 +21,7 @@ typedef struct process {
 	List *access_file_list;
 
 	// perf related
-	int perf_fd;
-	uint64_t sample_id;
-	void *rb;
+	List *perf_fdlist;
 
 	// cache related
 	cacheline **cache;
