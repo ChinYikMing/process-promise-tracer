@@ -24,8 +24,15 @@ typedef struct perf_sample {
         uint32_t cpu, res;
         uint64_t period;
         uint32_t size;
-        char data[];
-} sample_t;
+        char data[64];
+} sample_trp_t;
+
+typedef struct {
+        struct perf_event_header header;
+        uint64_t sample_id;
+        uint32_t pid, tid;
+        uint64_t addr;
+} sample_raw_t;
 
 typedef struct perf_fd {
         int fd;
@@ -45,6 +52,7 @@ int perf_event_reset(Process *proc);
 void *perf_event_rb_get(int perf_fd, size_t pages);
 void perf_event_rb_put(void *rb);
 
-int perf_event_rb_read(Process *proc, Perf_fd *perf_fd, sample_t *sample);
+int perf_event_raw_read(Process *proc, Perf_fd *perf_fd, sample_raw_t *sample);
+int perf_event_trp_read(Process *proc, Perf_fd *perf_fd, sample_trp_t *sample);
 
 #endif

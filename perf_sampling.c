@@ -91,7 +91,7 @@ int perf_event_unregister(Process *proc){
 		perf_fd = LIST_ENTRY(iter, Perf_fd);
 		//printf("fd: %d, %p\n", perf_fd->fd, perf_fd->rb);
 		close(perf_fd->fd);
-		perf_event_rb_put(perf_fd->rb);
+		//perf_event_rb_put(perf_fd->rb);
 	}
 
 	return 0;
@@ -166,11 +166,15 @@ void perf_event_rb_put(void *rb){
 		return;
 	
 	int ret = munmap(rb, PERF_RB_SIZE);
-	assert(0 == ret);
+	if(ret == -1){
+		perror("munmap");
+	} else {
+		printf("sage\n");
+	}
 	return;
 }
 
-int perf_event_rb_read(Process *proc, Perf_fd *perf_fd, sample_t *sample){
+int perf_event_raw_read(Process *proc, Perf_fd *perf_fd, sample_raw_t *sample){
 	if(!perf_fd)
 		return -EINVAL;
 
@@ -195,7 +199,54 @@ int perf_event_rb_read(Process *proc, Perf_fd *perf_fd, sample_t *sample){
 
 	while(tail < head){
 		uint64_t pos = tail % (PAGE_SIZE * PERF_RB_PAGE);
-		sample_t *ent = (sample_t *)((char*) rb + PAGE_SIZE /* meta page */ + pos);
+		sample_raw_t *ent = (sample_raw_t *)((char*) rb + PAGE_SIZE /* meta page */ + pos);
+
+		tail += ent->header.size; // skip header to read data
+
+		if(ent->header.type == PERF_RECORD_SAMPLE && 
+	     	     ent->sample_id == sample_id && 
+		       ent->pid == proc->pid){
+
+                        sample->pid = ent->pid;
+                        sample->tid = ent->tid;
+			sample->addr = ent->addr;
+
+			available = true;
+			break;
+		}
+	}
+
+	rb_meta->data_tail = tail; // update tail since kernel does not wrap
+
+	return available ? 0 : -EAGAIN;
+}
+
+int perf_event_trp_read(Process *proc, Perf_fd *perf_fd, sample_trp_t *sample){
+	if(!perf_fd)
+		return -EINVAL;
+
+	uint64_t sample_id = perf_fd->sample_id;
+	void *rb = perf_fd->rb;
+	if(!rb)
+		return -EINVAL;
+	
+	// the metadata header
+	struct perf_event_mmap_page *rb_meta = (struct perf_event_mmap_page *) rb;
+	uint64_t head = rb_meta->data_head;
+	uint64_t tail = rb_meta->data_tail;
+
+	READ_MEMORY_BARRIER();
+	assert(tail <= head);
+	if(head == tail){
+		//fprintf(stderr, "ring buffer is empty\n");
+		return -EAGAIN;
+	}
+
+	bool available = false;
+
+	while(tail < head){
+		uint64_t pos = tail % (PAGE_SIZE * PERF_RB_PAGE);
+		sample_trp_t *ent = (sample_trp_t *)((char*) rb + PAGE_SIZE /* meta page */ + pos);
 
 		tail += ent->header.size; // skip header to read data
 

@@ -8,7 +8,7 @@ typedef struct trp_sample {
         uint32_t cpu, res;
         uint64_t period;
         uint32_t size;
-        char data[];
+        char data[64];
 } trp_sample_t;
 
 #endif

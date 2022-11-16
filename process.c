@@ -37,6 +37,250 @@ int block_bit = 20;
 int set_bit = 6;
 int set_size = 1 << 6; // 6 is set_bit
 
+typedef struct fd {
+        int nr;
+        char path[PATH_MAX];
+} Fd;
+
+typedef struct devbuf {
+        char start[16];
+        size_t len;
+} Devbuf;
+
+typedef struct thread_data {
+	Process *proc;    // to get pid
+	Perf_fd *perf_fd; // to get sample_id and rb
+} pthread_data_t;
+
+static Node *using_camera(Process *proc){
+	Node *iter;
+	Fd *fd;
+
+	LIST_FOR_EACH(proc->fdlist, iter){
+		fd = LIST_ENTRY(iter, Fd);
+		if(0 == strcmp(fd->path, "/dev/video0"))
+			return iter;
+	}
+
+	return NULL;
+}
+
+static bool load_evt_high(Process *proc){
+
+}
+
+static bool write_to_nonpromise_file(Process *proc){
+
+}
+
+static bool streaming(Process *proc){
+
+}
+
+static char get_action_bit(const char *action, int index){
+	char *ptr = action;
+	size_t len = strlen(action);
+
+	for(size_t i = len; i > 0; i--){
+		if((len - index - 1) == i)
+			return action[i];
+	}
+
+	return action[0];
+}
+
+static int parse_net_lines(FILE *netfile, const char *sock_inode, char *rem_addr){
+	char buf[BUF_SIZE];
+	char *inode_ptr;
+	char *rem_addr_ptr;
+	char *rem_addr_qtr;
+	size_t len;
+	
+	while(fgets(buf, BUF_SIZE, netfile)){
+		inode_ptr = buf;
+		rem_addr_ptr = buf;
+
+		if(strstr(buf, sock_inode)){
+			rem_addr_ptr = strchr(rem_addr_ptr + 1, ':');
+			for(int i = 0; i < 2; i++)
+				rem_addr_ptr = strchr(rem_addr_ptr + 1, ' ');
+			rem_addr_qtr = strchr(rem_addr_ptr + 1, ' ');
+			len = rem_addr_qtr - rem_addr_ptr;
+			strncpy(rem_addr, rem_addr_ptr + 1, len);
+			rem_addr[len] = 0;
+			return 0;
+		}
+	}
+
+	return 1;
+} 
+static int get_sock_inode_by_sockfd(Process *proc, int sockfd, char *sock_inode){
+	char buf[BUF_SIZE] = {0};
+	char path[BUF_SIZE] = {0};
+	char pidstr[32] = {0};
+	char sockfdstr[32] = {0};
+	int ret;
+	char *ptr, *qtr;
+
+	sprintf(pidstr, "%d", proc->pid);
+	sprintf(sockfdstr, "%d", sockfd);
+
+	strcpy(path, PROC_DIR);
+	strcat(path, "/");
+	strcat(path, pidstr);
+	strcat(path, "/");
+	strcat(path, "fd");
+	strcat(path, "/");
+	strcat(path, sockfdstr);
+
+	ret = readlink(path, buf, BUF_SIZE);
+	if(-1 == ret)
+		return 1;
+	buf[ret] = 0;
+
+	ptr = buf;
+	ptr = strchr(buf, '[') + 1;
+	qtr = strchr(ptr, ']');
+	strncpy(sock_inode, ptr, qtr - ptr);
+	sock_inode[qtr - ptr] = 0;
+	//printf("sock_inode: %s, %d, %c, %c\n", sock_inode, qtr - ptr, *ptr, *qtr);
+	return 0;
+}
+
+static void get_ip_port_from_rem_addr(const char *rem_addr, int ipv4, char *ip, char *port){
+	char tmp[64] = {0};
+	uint16_t port_val;
+	char *ptr, *qtr;
+
+	ptr = rem_addr;
+	if(ipv4){
+		uint8_t *rtr;
+		uint32_t ip_val;
+
+		qtr = strchr(ptr, ':');
+		strcpy(tmp, "0x");
+		strncat(tmp, ptr, qtr - ptr);
+		tmp[qtr - ptr + 2] = 0;
+		ip_val = (uint32_t) strtoul(tmp, NULL, 16);
+		ip_val = ntohl(ip_val);
+
+		rtr = ((uint8_t *) &ip_val) + 3;
+                for(int i = 4; i > 0; i--){
+                        memset(tmp, 0, 64);
+                        sprintf(tmp, "%u", *rtr);
+			printf("tmp: %s\n", tmp);
+
+                        if(i == 1){
+                                strcat(ip, tmp);
+                                break;
+                        }
+
+                        strcat(ip, tmp);
+                        strcat(ip, ".");
+                        rtr--;
+                }
+	} else { // ipv6
+		qtr = strchr(ptr, ':');
+                strncat(tmp, ptr, qtr - ptr);
+                tmp[qtr - ptr] = 0;
+
+                ptr = ptr + 31;
+                for(int i = 0; i < 8; i++){
+                        for(int j = 0; j < 4; j++){
+                                sprintf(tmp, "%c", *ptr);
+                                strcat(ip, tmp);
+                                ptr--;
+                        }
+
+                        if(i == 7)
+                                break;
+
+                        strcat(ip, ":");
+                }
+	}
+
+	ptr = strchr(rem_addr, ':') + 1;
+	memset(tmp, 0, 64);
+	strcpy(tmp, "0x");
+	strcat(tmp, ptr);
+	port_val = (uint16_t) strtoul(tmp, NULL, 16);
+	sprintf(port, "%u", port_val);
+}
+
+static int get_rem_addr_by_sockfd(Process *proc, int sockfd, char *rem_addr, int *tcp, int *ipv4){
+	int ret;
+	char sock_inode[16];
+	ret = get_sock_inode_by_sockfd(proc, sockfd, sock_inode);
+	if(ret)
+		return 1;
+
+	// try tcp first
+	char tcp_file[32] = {0};
+	strcpy(tcp_file, PROC_DIR);
+	strcat(tcp_file, "/net/tcp");
+	FILE *net_file_ptr = fopen(tcp_file, "r");
+	if(!net_file_ptr)
+		return 1;
+
+	ret = parse_net_lines(net_file_ptr, sock_inode, rem_addr);
+	fclose(net_file_ptr);
+	if(!ret) {
+		*tcp = 1;
+		*ipv4 = 1;
+		return 0;
+	}
+	
+	// try tcp6 first
+	memset(tcp_file, 0, 32);
+	strcpy(tcp_file, PROC_DIR);
+	strcat(tcp_file, "/net/tcp6");
+	net_file_ptr = fopen(tcp_file, "r");
+	if(!net_file_ptr)
+		return 1;
+
+	ret = parse_net_lines(net_file_ptr, sock_inode, rem_addr);
+	fclose(net_file_ptr);
+	if(!ret){
+		*tcp = 1;
+		*ipv4 = 0;
+		return 0;
+	}
+
+	// try udp
+	char udp_file[32] = {0};
+	strcpy(udp_file, PROC_DIR);
+	strcat(udp_file, "/net/udp");
+	net_file_ptr = fopen(udp_file, "r");
+	if(!net_file_ptr)
+		return 1;
+
+	ret = parse_net_lines(net_file_ptr, sock_inode, rem_addr);
+	fclose(net_file_ptr);
+	if(!ret){
+		*tcp = 0;
+		*ipv4 = 1;
+		return 0;
+	}
+	
+	// try udp6
+	memset(udp_file, 0, 32);
+	strcpy(udp_file, PROC_DIR);
+	strcat(udp_file, "/net/udp6");
+	net_file_ptr = fopen(udp_file, "r");
+	if(!net_file_ptr)
+		return 1;
+
+	ret = parse_net_lines(net_file_ptr, sock_inode, rem_addr);
+	fclose(net_file_ptr);
+	if(!ret){
+		*tcp = 0;
+		*ipv4 = 0;
+		return 0;
+	}
+	
+	return 1;
+}
+
 bool if_parse_error(struct json_object* obj, Process *proc)
 {
     if(obj == NULL)
@@ -61,7 +305,6 @@ struct data *data_new(char* val1, char* val2){
 	d->val2 = val2;
 	return d;
 }
-
 bool process_promise_pass(Process *proc){
 
     	Elf64_Ehdr  *elf;
@@ -173,11 +416,6 @@ int access_file_list_init(List** access_file_list)
 }
 
 
-typedef struct fd {
-        unsigned int nr;
-        char path[PATH_MAX];
-} Fd;
-
 Fd *fd_create(int fd, const char *path){
 	Fd *_fd = malloc(sizeof(Fd));
 	if(!_fd)
@@ -262,11 +500,6 @@ Node *list_get_node_by_fd(List *list, int _fd){
 	}
 	return NULL;
 }
-
-typedef struct devbuf {
-        char start[16];
-        size_t len;
-} Devbuf;
 
 uint64_t str2uint64(const char *str){
 	return strtoull(str, NULL, 16);
@@ -518,7 +751,7 @@ void process_updateFdList(Process *proc){
 	char fd_file[32];
         while((entry = readdir(fd_dir))){
 	    const char *name = entry->d_name;
-	    unsigned int fd = (unsigned int) strtol(name, NULL, 10);
+	    int fd = (int) strtol(name, NULL, 10);
 
             if(0 == strcmp(name, ".") || 0 == strcmp(name, ".."))
                 continue;
@@ -531,6 +764,19 @@ void process_updateFdList(Process *proc){
 
 	    ssize_t size = readlink(fd_file, fd_path, PATH_MAX);
 	    fd_path[size] = 0;
+	    /*
+	    if(strstr(fd_path, "socket")){
+	    	char rem_addr[32] = {0};
+	    	char ip[32] = {0};
+	    	char port[32] = {0};
+		int tcp;
+		int ipv4;
+		get_rem_addr_by_sockfd(proc, fd, rem_addr, &tcp, &ipv4);
+		printf("rem_addr: %s, tcp: %d, ipv4: %d\n", rem_addr, tcp, ipv4);
+		get_ip_port_from_rem_addr(rem_addr, ipv4, ip, port);
+		printf("ip: %s, port: %s\n", ip, port);
+	    }
+	    */
 
 	    fd_node = list_get_node_by_fd(proc->fdlist, fd);
 	    if(fd_node) {
@@ -621,14 +867,14 @@ int process_stat(Process *proc){
 	return 0;
 }
 
-static void get_va_sample_from_sample(va_sample_t *va_sample, sample_t *sample){
+static void get_va_sample_from_sample(va_sample_t *va_sample, sample_raw_t *sample){
 	va_sample->pid = sample->pid;
 	va_sample->tid = sample->tid;
 	va_sample->buf_addr = sample->addr;
 	return;
 }
 
-static void get_trp_sample_from_sample(trp_sample_t *trp_sample, sample_t *sample){
+static void get_trp_sample_from_sample(trp_sample_t *trp_sample, sample_trp_t *sample){
 	trp_sample->ip = sample->ip;
 	trp_sample->pid = sample->pid;
 	trp_sample->tid = sample->tid;
@@ -640,18 +886,13 @@ static void get_trp_sample_from_sample(trp_sample_t *trp_sample, sample_t *sampl
 	return;
 }
 
-typedef struct thread_data {
-	Process *proc;    // to get pid
-	Perf_fd *perf_fd; // to get sample_id and rb
-} pthread_data_t;
-
 void *load_evt_monitoring(void *arg){
 	pthread_data_t *thread_data = (pthread_data_t *) arg;
 	Process *proc = (Process *) thread_data->proc;
 	Perf_fd *perf_fd = (Perf_fd *) thread_data->perf_fd;
 
 	int ret;
-	sample_t sample;
+	sample_raw_t sample;
 	va_sample_t va_sample;
 	char expr[32];
 	uint64_t addr_start, addr_end;
@@ -660,12 +901,11 @@ void *load_evt_monitoring(void *arg){
 		usleep(10000);
 		//sleep(1);
 
-		ret = perf_event_rb_read(proc, perf_fd, &sample);
+		ret = perf_event_raw_read(proc, perf_fd, &sample);
 		if(-EAGAIN == ret){
 		    continue;
 		} else if(ret < 0){
-			break;
-			//_exit(EXIT_FAILURE);
+			pthread_exit(NULL);
 		}
 
 		get_va_sample_from_sample(&va_sample, &sample);
@@ -694,7 +934,7 @@ void *trp_monitoring(void *arg){
 	Process *proc = (Process *) thread_data->proc;
 	Perf_fd *perf_fd = (Perf_fd *) thread_data->perf_fd;
 
-	sample_t sample;
+	sample_trp_t sample;
 	trp_sample_t trp_sample;
 	char *ptr;
 	int ret;
@@ -710,15 +950,12 @@ void *trp_monitoring(void *arg){
 		}
 
 		if(pfd.revents & POLLIN){
-			ret = perf_event_rb_read(proc, perf_fd, &sample);
+			ret = perf_event_trp_read(proc, perf_fd, &sample);
 
 			if(ret == -EAGAIN){
-				usleep(10000);
-				//sleep(1);
 				continue;
 			} else if(ret < 0){
-				break;
-				//_exit(EXIT_FAILURE);
+				pthread_exit(NULL);
 			}
 
 			get_trp_sample_from_sample(&trp_sample, &sample);
@@ -733,12 +970,12 @@ void *trp_monitoring(void *arg){
 
 		if(pfd.revents & POLLHUP){                  // perf fd is not valid or disconnected
 			//printf("%d poll hup\n", pfd.fd);
-			break;
+			pthread_exit(NULL);
 		}
 
 		if(pfd.revents & POLLERR){                    
 			//printf("%d poll err\n", pfd.fd);
-			break;
+			pthread_exit(NULL);
 		}
 	}
 }
@@ -837,20 +1074,18 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 			fdlist_init(&proc->fdlist);
 			devbuflist_init(&proc->devbuflist);
 			perffdlist_init(&proc->perf_fdlist);
+			cache_init(&proc->cache, set_size, assoc);
 
 			int ret;
-
-			cache_init(&proc->cache, set_size, assoc);
 			Perf_fd *perf_fd1, *perf_fd2;
 
-			// read process open fd list( read here because malloc memory cannot be shared with child )
+			// read process open fd list(read here because malloc memory cannot be shared with child)
 			process_updateFdList(proc);
 
 			// get device mmap buffer list
 			process_updateDevBufList(proc);
 
-			perf_fd1 = perf_event_register(proc, PERF_TYPE_RAW, ALL_LOADS, PERF_SAMPLE_IDENTIFIER | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR |
-										    PERF_SAMPLE_IP | PERF_SAMPLE_TIME | PERF_SAMPLE_CPU | PERF_SAMPLE_PERIOD | PERF_SAMPLE_RAW);
+			perf_fd1 = perf_event_register(proc, PERF_TYPE_RAW, ALL_LOADS, PERF_SAMPLE_IDENTIFIER | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR);
 			assert(perf_fd1 != NULL);
 			perf_fd2 = perf_event_register(proc, PERF_TYPE_TRACEPOINT, SYSCALL_WRITE, PERF_SAMPLE_IDENTIFIER|PERF_SAMPLE_IP| PERF_SAMPLE_ADDR |
 												PERF_SAMPLE_TID|PERF_SAMPLE_TIME|PERF_SAMPLE_CPU|PERF_SAMPLE_PERIOD|PERF_SAMPLE_RAW);
@@ -882,15 +1117,54 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 
 			perf_event_start(proc);
 
+			// check all load event and sys_enter_write periodically to detect data leakage and update some process state
+			Node *node;
+			struct data *d;
+			const char *action_mask;
+			bool video;
+			bool save;
+			bool stream;
 			while(true){
 				sleep(1);
 
 				process_updateFdList(proc);
 				process_updateDevBufList(proc);
+
+				/*
+				if((node = using_camera(proc))){
+					d = node->data;
+					action_mask = d->val2;
+					video = get_action_bit(action_mask, 0);
+					save = get_action_bit(action_mask, 1);
+					stream = get_action_bit(action_mask, 2);
+					
+					if(video && !save && !stream){
+						if(load_evt_high(proc) && (write_to_nonpromise_file(proc) || streaming(proc))){
+							if(write_to_nonpromise_file(proc)){
+								send_signal(proc, SIGSTOP, "The process claimed that it will not save video, but it did!\n");
+							}
+							
+							if(streaming(proc)){
+								send_signal(proc, SIGSTOP, "The process claimed that it will not video streaming, but it did!\n");
+							}
+						}
+					} else if(video && save && !stream){ 
+						if(load_evt_high(proc) && streaming(proc)){
+							send_signal(proc, SIGSTOP, "The process claimed that it will not video streaming, but it did!\n");
+						}
+					} else if(video && !save && stream){
+						if(load_evt_high(proc) && write_to_nonpromise_file(proc)){
+							send_signal(proc, SIGSTOP, "The process claimed that it will not save video, but it did!\n");
+						}
+					} else if(video && save && stream){ 
+
+					}
+				}
+				*/
 			
 				if(process_is_dead(proc)){
 					perf_event_stop(proc);
-					//perf_event_unregister(proc);
+					perf_event_unregister(proc);
 					printSummary(proc->hit_cnt, proc->miss_cnt, proc->eviction_cnt);
 					process_clean(proc);
 					printf("tracee exit\n");
