@@ -31,24 +31,24 @@ int config_read(Config *cf, const char *config_file){
 			mark=1;
 			continue;
 		}
-		else{break;}
-		if(strcmp(title2, buf)){
+		else if(strcmp(title2, buf)){
 			mark=2;
 			continue;
 		}
-		else{break;}
-		if(mark == 1){
-			char *type, *val;
-			type = strtok(buf, "=");
-			val = strtok(NULL, "=");
-			c = conf_create(type, val);
-			config_add(cf, c);
-		}
-		else if(mark == 2){
-			char *val;
-			val = buf;
-			c = conf_create(CONF_TYPE_PROG, val);
-			config_add(cf, c);
+		else{
+			if(mark == 1){
+				char *type, *val;
+				type = strtok(buf, "=");
+				val = strtok(NULL, "=");
+				c = conf_create(type, val);
+				config_add(cf, c);
+			}
+			else if(mark == 2){
+				char *val;
+				val = buf;
+				c = conf_create(CONF_TYPE_PROG, val);
+				config_add(cf, c);
+			}
 		}
 		// c = conf_create(CONF_TYPE_PROG, buf);
 		// config_add(cf, c);
