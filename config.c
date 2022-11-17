@@ -22,10 +22,34 @@ int config_read(Config *cf, const char *config_file){
 
 	char buf[BUF_SIZE] = {0};
 	Conf *c = NULL;
+	int mark = 0;
+	char title1[] = "[Daemon]";
+	char title2[] = "[Untrusted Program]";
 	while(fgets(buf, BUF_SIZE, config_fptr)){
 		buf[strcspn(buf, "\r\n")] = 0;
-		c = conf_create(CONF_TYPE_PROG, buf);
-		config_add(cf, c);
+		if(strcmp(title1, buf)){
+			mark=1;
+			continue;
+		}
+		else if(strcmp(title2, buf)){
+			mark=2;
+			continue;
+		}
+		if(mark == 1){
+			char *type, *val;
+			type = strtok(buf, "=");
+			val = strtok(NULL, "=");
+			c = conf_create(type, val);
+			config_add(cf, c);
+		}
+		if(mark == 2){
+			char *val;
+			val = buf;
+			c = conf_create(CONF_TYPE_PROG, val);
+			config_add(cf, c);
+		}
+		// c = conf_create(CONF_TYPE_PROG, buf);
+		// config_add(cf, c);
 	}
 
 	fclose(config_fptr);
