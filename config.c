@@ -54,6 +54,7 @@ int config_read(Config *cf, const char *config_file){
 		// config_add(cf, c);
 	}
 
+
 	fclose(config_fptr);
 	return 0;
 }
