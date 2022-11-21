@@ -67,16 +67,6 @@ $systemctl status process-promise-tracerd
 /usr/bin/test
 ```
 
-## Bugs
-
-1. ptrace attached process cannot terminated using control-C
-2. ptrace will block the daemon process to trace other processes until the ptrace attached process finishes execution
-
-## Bugs Reduplication
-
-make install 之後修改 /etc/process_promise_tracer.conf 增加 test/camera_test/example/example 的執行路徑， 一個 terminal 執行 ./process-promise-tracerd, 一個 terminal 執行 test/camera_test/example/example，
-會發現無法用 control-C 結束 test/camera_test/example/example, ./process-promise-tracerd 則會被 blocked 直到 test/camera_test/example/example 執行結束
-
 ## Version History
 
 * 0.2
