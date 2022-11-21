@@ -6,8 +6,10 @@
 #include "signal.h"
 #include "perf_sampling.h"
 #include "perf_va.h"
+#include "cpu.h"
 #include "perf_trp.h"
 #include "perf_event.h"
+#include "config.h"
 #include "cache_va.h"
 #include "log.h"
 #include <libelf.h>
@@ -16,7 +18,6 @@
 #include <sys/user.h>
 #include <sys/syscall.h>
 #include <json-c/json.h>
-
 /*
 // cache L3
 int set_bit = 13;
@@ -47,46 +48,155 @@ typedef struct devbuf {
         size_t len;
 } Devbuf;
 
+struct data {
+ 	char* val1;
+	char* val2;
+};
+
+typedef struct write_sample {
+	unsigned long fd;
+	unsigned long buf;
+	unsigned long len;
+} WriteSample;
+
 typedef struct thread_data {
 	Process *proc;    // to get pid
 	Perf_fd *perf_fd; // to get sample_id and rb
 } pthread_data_t;
 
-static Node *using_camera(Process *proc){
+static bool get_action_bit(const char *action, int index){
+	size_t len = strlen(action);
+
+	if(index < 0 || index > len)
+		return false;
+
+	for(size_t i = len; i > 0; i--){
+		if((len - index - 1) == i)
+			return (action[i] == '1');
+	}
+}
+
+static bool using_camera(Process *proc){
 	Node *iter;
 	Fd *fd;
 
 	LIST_FOR_EACH(proc->fdlist, iter){
 		fd = LIST_ENTRY(iter, Fd);
 		if(0 == strcmp(fd->path, "/dev/video0"))
-			return iter;
+			return true;
 	}
 
-	return NULL;
+	return false;
 }
 
 static bool load_evt_high(Process *proc){
-
+	return (proc->hit_cnt > 0);
 }
 
-static bool write_to_nonpromise_file(Process *proc){
+static int invalid_write(Process *proc, bool save){
+	List *access_file_list = proc->access_file_list;
+	List *wsl = proc->write_sample_list;
+	Node *iter, *fileiter;
+	struct data *filedata;
+	size_t i;
+	WriteSample *ws;
+	char buf[BUF_SIZE] = {0};
+	char basepath[BUF_SIZE] = {0};
+	char path[BUF_SIZE] = {0};
+	int ret;
+	char pidstr[32] = {0};
+	char fdstr[32] = {0};
 
-}
+	sprintf(pidstr, "%d", proc->pid);
 
-static bool streaming(Process *proc){
+	strcpy(basepath, PROC_DIR);
+	strcat(basepath, "/");
+	strcat(basepath, pidstr);
+	strcat(basepath, "/");
+	strcat(basepath, "fd");
+	strcat(basepath, "/");
 
-}
+	if(save && 0 == list_size(access_file_list)) // no description of access file => break the promise
+		return -ENOENT;
 
-static char get_action_bit(const char *action, int index){
-	char *ptr = action;
-	size_t len = strlen(action);
+	pthread_spin_lock(&proc->wsl_lock);
+	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
+		ws = iter->data;
 
-	for(size_t i = len; i > 0; i--){
-		if((len - index - 1) == i)
-			return action[i];
+		sprintf(fdstr, "%d", ws->fd);
+		strcpy(path, basepath);
+		strcat(path, fdstr);
+		ret = readlink(path, buf, BUF_SIZE);
+		if(-1 == ret)
+			continue;
+		buf[ret] = 0;
+
+		LIST_FOR_EACH(access_file_list, fileiter){
+			filedata = LIST_ENTRY(fileiter, struct data);
+			if(0 == strcmp(filedata->val1, buf)){
+				if(false == get_action_bit(filedata->val2, 1)){ // bit1 is write bit
+					pthread_spin_unlock(&proc->wsl_lock);
+					return -EINVAL;
+				} else {
+					pthread_spin_unlock(&proc->wsl_lock);
+					return 0;
+				}
+			}
+		}
+
+		//printf("fd: %lu, buf: %lu, len: %lu\n", ws->fd, ws->buf, ws->len);
 	}
+	pthread_spin_unlock(&proc->wsl_lock);
 
-	return action[0];
+	return -EINVAL;
+}
+
+static bool invalid_streaming(Process *proc, bool stream){
+	List *wsl = proc->write_sample_list;
+	Node *iter;
+	size_t i;
+	WriteSample *ws;
+	char buf[BUF_SIZE] = {0};
+	char basepath[BUF_SIZE] = {0};
+	char path[BUF_SIZE] = {0};
+	int ret;
+	char pidstr[32] = {0};
+	char sockfdstr[32] = {0};
+
+	sprintf(pidstr, "%d", proc->pid);
+
+	strcpy(basepath, PROC_DIR);
+	strcat(basepath, "/");
+	strcat(basepath, pidstr);
+	strcat(basepath, "/");
+	strcat(basepath, "fd");
+	strcat(basepath, "/");
+
+	/*
+	if(0 == list_size(connections_list)) // no description of access file => break the promise
+		return -ENOENT;
+		*/
+
+	pthread_spin_lock(&proc->wsl_lock);
+	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
+		ws = iter->data;
+
+		sprintf(sockfdstr, "%d", ws->fd);
+		strcpy(path, basepath);
+		strcat(path, sockfdstr);
+		ret = readlink(path, buf, BUF_SIZE);
+		if(-1 == ret)
+			continue;
+		buf[ret] = 0;
+
+		if(strstr(buf, "socket"))
+			return true;
+
+		//printf("fd: %lu, buf: %lu, len: %lu\n", ws->fd, ws->buf, ws->len);
+	}
+	pthread_spin_unlock(&proc->wsl_lock);
+
+	return false;
 }
 
 static int parse_net_lines(FILE *netfile, const char *sock_inode, char *rem_addr){
@@ -291,11 +401,6 @@ bool if_parse_error(struct json_object* obj, Process *proc)
 	return true;
 }
 
-struct data {
- 	char* val1;
-	char* val2;
-};
-
 struct data *data_new(char* val1, char* val2){
 	struct data *d = malloc(sizeof(struct data));
 	if(!d)
@@ -305,8 +410,8 @@ struct data *data_new(char* val1, char* val2){
 	d->val2 = val2;
 	return d;
 }
-bool process_promise_pass(Process *proc){
 
+bool process_promise_pass(Process *proc){
     	Elf64_Ehdr  *elf;
 	Elf64_Shdr  *shdr;
 
@@ -454,6 +559,38 @@ int perffdlist_init(List **perffdlist){
 	return 0;
 }
 
+WriteSample *write_sample_create(unsigned long fd, unsigned long buf, unsigned long len){
+	WriteSample *ws = malloc(sizeof(WriteSample));
+	if(!ws)
+		return NULL;
+
+	ws->fd = fd;
+	ws->buf = buf;
+	ws->len = len;
+
+	return ws;
+}
+
+int wsl_init(List **write_sample_list){
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	// create 8 dummy node
+	Node *dummy_node;
+	WriteSample *dummy_sample;
+	for(int i = 0; i < 8; i++){
+		dummy_sample = write_sample_create(0, 0, 0);
+		dummy_node = node_create(dummy_sample);
+		list_push_back(tmp, dummy_node);
+	}
+
+	*write_sample_list = tmp;
+	return 0;
+}
+
 void fdlist_destroy(List *fdlist){
 	Node *iter;
 	Fd *fd;
@@ -592,7 +729,7 @@ bool process_match_exe(Process *proc, const char *untrusted_proc){
 	return (0 == strcmp(proc->exe, untrusted_proc)) ? true : false;
 }
 
-bool process_is_trusted(Process *proc, Config *cf){
+bool process_is_trusted(Process *proc){
 	Conf *c = NULL;
 	Node *n = cf->list->head;
 	size_t cf_list_size = list_size(cf->list);
@@ -620,14 +757,17 @@ Process *process_create(int pid){
 	proc->flags = 0;
 	memset(proc->exe, 0, sizeof(PATH_MAX));
 	proc->tracer = 0;
+	proc->last_run_cpu = -1;
 
 	// perf related
 	proc->perf_fdlist = NULL;
+	pthread_spin_init(&proc->wsl_lock, PTHREAD_PROCESS_SHARED);
 
 	return proc;
 }
 
 void process_destroy(Process *proc){
+	pthread_spin_destroy(&proc->wsl_lock);
 	munmap(proc, PROC_SIZE);
 	return;
 }
@@ -857,6 +997,99 @@ int process_stat(Process *proc){
 		// fetch flags
 		ptr = ptr + 1;
 		sscanf(ptr, "%u", &proc->flags);
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip minflt
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip cminflt
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip majflt
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip cmajflt
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip utime
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip stime
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip cutime
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip cstime
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip priority
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip nice
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip num_threads
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip itrealvalue
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip starttime
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip vsize
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip rss
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip rsslim
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip startcode
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip endcode
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip startstack
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip kstkesp
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip kstkeip
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip signal
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip blocked
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip sigignore
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip sigcatch
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip wchan
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip nswap
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip cnswap
+		ptr = strchr(ptr + 1, ' ');
+
+		// skip exit_signal
+		ptr = strchr(ptr + 1, ' ');
+
+		// fetch processor
+		ptr = ptr + 1;
+		sscanf(ptr, "%d", &proc->last_run_cpu);
+		ptr = strchr(ptr + 1, ' ');
 
 		fclose(stat_file_ptr);
 	}
@@ -886,6 +1119,27 @@ static void get_trp_sample_from_sample(trp_sample_t *trp_sample, sample_trp_t *s
 	return;
 }
 
+/*
+ * the sleep time in microsecond is based on the clock speed of CPU which last ran by the process
+ */
+static unsigned long get_usleep_time(Process *proc){
+	int last_run_cpu = proc->last_run_cpu;
+	unsigned long clock_speed_MHz = cpu[last_run_cpu].clock_speed;
+	unsigned long long clock_speed = clock_speed_MHz * 1024 * 1024;
+	unsigned long msec_per_sec = 1000000;
+	double ratio = ((double) clock_speed / 2) / clock_speed;
+
+	/*
+	for(int i = 0; i < 8; i++){
+		printf("%d %lu\n", i+1, cpu[i].clock_speed);
+	}
+	exit(1);
+	*/
+
+	//printf("%llu %lf %llu\n", clock_speed, ratio, (unsigned long)(ratio * msec_per_sec));
+	return (unsigned long) (ratio * msec_per_sec);
+}
+
 void *load_evt_monitoring(void *arg){
 	pthread_data_t *thread_data = (pthread_data_t *) arg;
 	Process *proc = (Process *) thread_data->proc;
@@ -898,8 +1152,13 @@ void *load_evt_monitoring(void *arg){
 	uint64_t addr_start, addr_end;
 
 	while(true){
-		usleep(10000);
-		//sleep(1);
+		//printf("usleep %lu\n", get_usleep_time(proc));
+		usleep(get_usleep_time(proc));
+		/*
+		proc->hit_cnt = 0;
+		proc->miss_cnt = 0;
+		proc->eviction_cnt = 0;
+		*/
 
 		ret = perf_event_raw_read(proc, perf_fd, &sample);
 		if(-EAGAIN == ret){
@@ -934,6 +1193,12 @@ void *trp_monitoring(void *arg){
 	Process *proc = (Process *) thread_data->proc;
 	Perf_fd *perf_fd = (Perf_fd *) thread_data->perf_fd;
 
+	Node *iter;
+	size_t i;
+	WriteSample *ws;
+	unsigned long fd;
+	unsigned long buf;
+	unsigned long len;
 	sample_trp_t sample;
 	trp_sample_t trp_sample;
 	char *ptr;
@@ -959,16 +1224,42 @@ void *trp_monitoring(void *arg){
 			}
 
 			get_trp_sample_from_sample(&trp_sample, &sample);
+			i = 0;
+			ptr = ((char *) trp_sample.data) + 16;
+			fd = *((unsigned long *) ptr);
+			ptr = ((char *) ptr) + sizeof(unsigned long);
+			buf = *((unsigned long *) ptr);
+			ptr = ((char *) ptr) + sizeof(unsigned long);
+			len = *((unsigned long *) ptr);
 
+			pthread_spin_lock(&proc->wsl_lock);
+			// records only latest 8 samples
+			if(8 == list_size(proc->write_sample_list))
+				proc->write_sample_list->size = 0;
+
+			iter = proc->write_sample_list->head;
+			while(i < list_size(proc->write_sample_list)){
+				iter = iter->next;
+				i++;
+			}
+			ws = iter->data;
+			ws->fd = fd;
+			ws->buf = buf;
+			ws->len = len;
+			proc->write_sample_list->size++;
+			pthread_spin_unlock(&proc->wsl_lock);
+
+			/*
 			ptr = ((char *) trp_sample.data) + 16;
 			printf("timestamp: %lx, pid: %d, size: %u, (fd: %zu", trp_sample.time, trp_sample.pid, trp_sample.size, *((unsigned long *) ptr));
 			ptr = ((char *) ptr) + sizeof(unsigned long);
 			printf(", buf: %p", *((unsigned long *) ptr));
 			ptr = ((char *) ptr) + sizeof(unsigned long);
 			printf(", byte: %ld)\n", *((unsigned long *) ptr));
+			*/
 		}
 
-		if(pfd.revents & POLLHUP){                  // perf fd is not valid or disconnected
+		if(pfd.revents & POLLHUP){                  // perf fd is not invalid or disconnected
 			//printf("%d poll hup\n", pfd.fd);
 			pthread_exit(NULL);
 		}
@@ -981,7 +1272,7 @@ void *trp_monitoring(void *arg){
 }
 
 // skip pid of repeat if 'repeat' in /proc/[pid]/task directory since it is same as [pid]
-void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, Config *cf){ 
+void scan_proc_dir(List *list, const char *dir, Process *repeat, double period){ 
     DIR *scan_dir = opendir(dir);
     DIRent *entry;
 
@@ -1035,7 +1326,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 	}
 	process_stat(proc);
 
-	scan_proc_dir(list, pid_path, proc, period, cf);
+	scan_proc_dir(list, pid_path, proc, period);
 
 	if(process_is_stop(proc))
 		continue;
@@ -1046,13 +1337,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		continue;
 	}
 
-	if(process_is_trusted(proc, cf)){
-		process_destroy(proc);
-		node_destroy(proc_node);
-		continue;
-	}
-
-	if(!process_promise_pass(proc)){
+	if(process_is_trusted(proc)){
 		process_destroy(proc);
 		node_destroy(proc_node);
 		continue;
@@ -1071,9 +1356,16 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 		if(child == 0){ 
 			proc->tracer = child;
 
+			if(!process_promise_pass(proc)){
+				process_destroy(proc);
+				node_destroy(proc_node);
+				exit(EXIT_FAILURE);
+			}
+
 			fdlist_init(&proc->fdlist);
 			devbuflist_init(&proc->devbuflist);
 			perffdlist_init(&proc->perf_fdlist);
+			wsl_init(&proc->write_sample_list);
 			cache_init(&proc->cache, set_size, assoc);
 
 			int ret;
@@ -1118,49 +1410,48 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 			perf_event_start(proc);
 
 			// check all load event and sys_enter_write periodically to detect data leakage and update some process state
-			Node *node;
+			List *device_list = proc->device_list;
+			Node *iter;
 			struct data *d;
 			const char *action_mask;
 			bool video;
 			bool save;
 			bool stream;
 			while(true){
-				sleep(1);
+				//printf("usleep %lu\n", get_usleep_time(proc));
+				usleep(get_usleep_time(proc));
+				printf("hit: %d\n", proc->hit_cnt);
 
+				process_stat(proc);
 				process_updateFdList(proc);
 				process_updateDevBufList(proc);
 
-				/*
-				if((node = using_camera(proc))){
-					d = node->data;
+				if(using_camera(proc)){
+					LIST_FOR_EACH(device_list, iter){
+						d = LIST_ENTRY(iter, struct data);
+						if(0 == strcmp(d->val1, "camera"))
+							break;
+					}
+
 					action_mask = d->val2;
 					video = get_action_bit(action_mask, 0);
 					save = get_action_bit(action_mask, 1);
 					stream = get_action_bit(action_mask, 2);
-					
-					if(video && !save && !stream){
-						if(load_evt_high(proc) && (write_to_nonpromise_file(proc) || streaming(proc))){
-							if(write_to_nonpromise_file(proc)){
-								send_signal(proc, SIGSTOP, "The process claimed that it will not save video, but it did!\n");
-							}
-							
-							if(streaming(proc)){
-								send_signal(proc, SIGSTOP, "The process claimed that it will not video streaming, but it did!\n");
-							}
-						}
-					} else if(video && save && !stream){ 
-						if(load_evt_high(proc) && streaming(proc)){
-							send_signal(proc, SIGSTOP, "The process claimed that it will not video streaming, but it did!\n");
-						}
-					} else if(video && !save && stream){
-						if(load_evt_high(proc) && write_to_nonpromise_file(proc)){
-							send_signal(proc, SIGSTOP, "The process claimed that it will not save video, but it did!\n");
-						}
-					} else if(video && save && stream){ 
 
+					if(load_evt_high(proc)){
+						printf("high load event\n");
+						if(invalid_write(proc, save)){
+							send_signal(proc, SIGSTOP, 
+								   "The process claimed that it will not save video, but it did!\n");
+						} 
+						
+						if(invalid_streaming(proc, stream)){
+							send_signal(proc, SIGSTOP, 
+								   "The process claimed that it will not video invalid_streaming, but it did!\n");
+						}
 					}
+
 				}
-				*/
 			
 				if(process_is_dead(proc)){
 					perf_event_stop(proc);
@@ -1170,7 +1461,6 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 					printf("tracee exit\n");
 					_exit(EXIT_SUCCESS);
 				}
-
 			}
 		} else {
 			list_push_back(list, proc_node);
@@ -1178,7 +1468,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, 
 	} else { // exist before
 		if(!process_is_zombie(proc)){
 			process_updateExe(proc); // pid might be reused, then the exe could change, such as calling execve series function
-			printf("pid: %d, state: %c, new_exe: %s\n", proc->pid, proc->state, proc->exe);
+			//printf("pid: %d, state: %c, new_exe: %s\n", proc->pid, proc->state, proc->exe);
 		}
 	}
     }

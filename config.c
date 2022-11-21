@@ -2,12 +2,19 @@
 #include "list.h"
 #include "basis.h"
 
-int config_init(Config *cf){
-	cf->list = malloc(sizeof(List));
-	if(!cf->list)
+Config *cf = NULL;
+
+int config_init(Config **cf){
+	Config *tmp = malloc(sizeof(Config));
+	if(!tmp)
 		return 1;
 
-	LIST_INIT(cf->list);
+	tmp->list = malloc(sizeof(List));
+	if(!tmp->list)
+		return 1;
+
+	LIST_INIT(tmp->list);
+	*cf = tmp;
 	return 0;
 }
 
@@ -15,8 +22,8 @@ int config_parse(const char *config_file){
 	return CONFIG_PARSE_SUCCESS;
 }
 
-int config_read(Config *cf, const char *config_file){
-	FILE *config_fptr = fopen(config_file, "r");
+int config_read(Config *cf){
+	FILE *config_fptr = fopen(CONFIG_FILE, "r");
 	if(!config_fptr)
 		return 1;
 

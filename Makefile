@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -g -Wall `pkg-config --cflags json-c` -DDAEMON
 CLIBS = `pkg-config --libs json-c` -pthread
 
-all: process-promise-tracerd.c list.c process.c signal.c perf_sampling.c config.c cache_va.c log.c
+all: process-promise-tracerd.c list.c process.c signal.c perf_sampling.c config.c cache_va.c log.c cpu.c
 	$(CC) $(CFLAGS) $^ -o process-promise-tracerd $(CLIBS)
 
 install:

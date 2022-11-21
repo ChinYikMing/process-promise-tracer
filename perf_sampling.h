@@ -48,6 +48,7 @@ int perf_event_unregister(Process *proc);
 int perf_event_start(Process *proc);
 int perf_event_stop(Process *proc);
 int perf_event_reset(Process *proc);
+int perf_event_period(int perf_fd, uint64_t period);
 
 void *perf_event_rb_get(int perf_fd, size_t pages);
 void perf_event_rb_put(void *rb);

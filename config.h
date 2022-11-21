@@ -23,9 +23,11 @@ typedef struct config {
 	List *list;
 } Config;
 
-int config_init(Config *cf);
+extern Config *cf;
+
+int config_init(Config **cf);
 int config_parse(const char *config_file);
-int config_read(Config *cf, const char *config_file);
+int config_read(Config *cf);
 int config_add(Config *cf, Conf *c);
 int config_del(Config *cf, Conf *c);
 int config_destroy(Config *cf);

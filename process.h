@@ -2,6 +2,7 @@
 #define PROCESS_HDR
 
 #include "list.h"
+#include <pthread.h>
 #include "config.h"
 #include "cache_va.h"
 #include <limits.h>
@@ -22,6 +23,9 @@ typedef struct process {
 
 	// perf related
 	List *perf_fdlist;
+	List *write_sample_list;
+	pthread_spinlock_t wsl_lock;    // wsl = "write sample list"
+	int last_run_cpu;
 
 	// cache related
 	cacheline **cache;
@@ -33,7 +37,7 @@ typedef struct process {
 
 Process *process_create(int pid);
 void process_destroy(Process *proc);
-void scan_proc_dir(List *list, const char *dir, Process *repeat, double period, Config *cf);
+void scan_proc_dir(List *list, const char *dir, Process *repeat, double period);
 
 pid_t self_pid;
 char self_name[16];

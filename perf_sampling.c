@@ -41,9 +41,9 @@ Perf_fd *perf_event_register(Process *proc, uint32_t type, event_t event, uint64
     attr.sample_type = sample_type;
     attr.disabled = 1;
     attr.exclude_user = 0;
-    attr.exclude_kernel = 0;
+    attr.exclude_kernel = 1;
     attr.precise_ip = 3;
-    attr.sample_period = 10000;
+    attr.sample_period = 3000;
     attr.wakeup_events = 1;
     //attr.inherit = 1;
     
@@ -94,6 +94,14 @@ int perf_event_unregister(Process *proc){
 		//perf_event_rb_put(perf_fd->rb);
 	}
 
+	return 0;
+}
+
+int perf_event_period(int perf_fd, uint64_t period){
+	int ret;
+	ret = ioctl(perf_fd, PERF_EVENT_IOC_PERIOD, &period);
+	if(ret == -1)
+		handle_error("perf event set period failed");
 	return 0;
 }
 
