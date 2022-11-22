@@ -20,6 +20,7 @@ typedef struct process {
 
 	List *device_list;
 	List *access_file_list;
+	List *connection_list;
 
 	// perf related
 	List *perf_fdlist;
