@@ -47,16 +47,16 @@ int main(int argc, char **argv){
 	}
 
 	while(1){
-		sleep(1);
+		usleep(scan_procfs_period);
+		cpu_stat(cpu);              // CPU clock speed changes with its temperature
 
 		if(sighup_coming){
 			sighup_coming = 0;
 			config_read(cf);
-			cpu_stat(cpu);
 			printf("received signal!\n");
 		}
 
-		scan_proc_dir(proc_list, PROC_DIR, NULL, scan_procfs_period);
+		scan_proc_dir(proc_list, PROC_DIR, NULL);
 		size_t proc_list_size = list_size(proc_list);
 		printf("process count: %zu\n", proc_list_size);
 	}
