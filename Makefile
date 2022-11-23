@@ -8,7 +8,7 @@ all: process-promise-tracerd.c list.c process.c signal.c perf_sampling.c config.
 install:
 	#process-promise-tracerd installation
 	cp process-promise-tracerd /usr/sbin/
-	touch /etc/process_promise_tracer.conf
+	cp process_promise_tracer.conf /etc/process_promise_tracer.conf 
 	touch /var/log/process_promise_tracer.log
 	#systemd installation
 	cp process-promise-tracer.service /etc/systemd/system/

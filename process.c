@@ -19,25 +19,11 @@
 #include <sys/user.h>
 #include <sys/syscall.h>
 #include <json-c/json.h>
-/*
-// cache L3
-int set_bit = 13;
-int assoc = 12;
-int block_bit = 6;
-int set_bit = 13; // 6
-*/
 
-/*
-// cache L1
-int assoc = 8;
-int block_bit = 6;
-int set_bit = 6;
-int set_size = 1 << set_bit;
-*/
-int assoc = 8;
-int block_bit = 20;
-int set_bit = 6;
-int set_size = 1 << 6; // 6 is set_bit
+int assoc = 0;
+int block_bit = 0;
+int set_bit = 0;
+int set_size = 0;
 
 typedef struct fd {
         int nr;
@@ -678,8 +664,26 @@ void fdlist_destroy(List *fdlist){
 	}
 }
 
-int cache_init(cacheline ***cache, int set, int assoc){
-	void *tmp = cache_create(set, assoc);
+int cache_init(cacheline ***cache, int set_size, int assoc){
+	if(0 == assoc && 0 == block_bit && 0 == set_bit && 0 == set_size){
+		Node *iter;
+		Conf *c;
+		LIST_FOR_EACH(cf->list, iter){
+			c = LIST_ENTRY(iter, Conf);
+			if(0 == strcmp(c->key, "assoc")){
+				sscanf(c->val, "%d", &assoc);
+			} else if(0 == strcmp(c->key, "block_bit")){
+				sscanf(c->val, "%d", &block_bit);
+			} else if(0 == strcmp(c->key, "set_bit")){
+				sscanf(c->val, "%d", &set_bit);
+			}
+		}
+		set_size = 1 << set_bit;
+	}
+
+	//printf("%d %d %d %d\n", assoc, block_bit, set_bit, set_size);
+
+	void *tmp = cache_create(set_size, assoc);
 	if(!tmp)
 		return 1;
 

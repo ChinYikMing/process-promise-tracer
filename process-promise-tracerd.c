@@ -26,7 +26,25 @@ int main(int argc, char **argv){
 	sprintf(self_name, "%d", self_pid);
 
 	List *proc_list = malloc(sizeof(List));
+	if(!proc_list){
+		log_open();
+		syslog(LOG_ERR, LOG_PREFIX"process list malloc failed");
+		log_close();
+
+		exit(EXIT_FAILURE);
+	}
 	LIST_INIT(proc_list);
+
+	int scan_procfs_period; 
+	Node *iter;
+	Conf *c;
+	LIST_FOR_EACH(cf->list, iter){
+		c = LIST_ENTRY(iter, Conf);
+		if(0 == strcmp(c->key, "scan_procfs_period")){
+			sscanf(c->val, "%d", &scan_procfs_period);
+			break;
+		}
+	}
 
 	while(1){
 		sleep(1);
@@ -38,9 +56,11 @@ int main(int argc, char **argv){
 			printf("received signal!\n");
 		}
 
-		scan_proc_dir(proc_list, PROC_DIR, NULL, 1000);
+		scan_proc_dir(proc_list, PROC_DIR, NULL, scan_procfs_period);
 		size_t proc_list_size = list_size(proc_list);
 		printf("process count: %zu\n", proc_list_size);
 	}
-	return 0;
+
+	// never reach here
+	exit(EXIT_SUCCESS);
 }
