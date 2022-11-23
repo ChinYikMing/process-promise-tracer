@@ -28,6 +28,9 @@ typedef struct process {
 	pthread_spinlock_t wsl_lock;    // wsl = "write sample list"
 	int last_run_cpu;
 
+	int tty_nr;
+	char tty_path[32];
+
 	// cache related
 	cacheline **cache;
 	int glob_ref_cnt;

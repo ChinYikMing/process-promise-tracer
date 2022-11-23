@@ -1,5 +1,6 @@
 #include "basis.h"
 #include <pthread.h>
+#include <arpa/inet.h>
 #include "list.h"
 #include "process.h"
 #include <poll.h>
@@ -123,7 +124,7 @@ static int invalid_write(Process *proc, bool save){
 	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
 		ws = iter->data;
 
-		sprintf(fdstr, "%d", ws->fd);
+		sprintf(fdstr, "%lu", ws->fd);
 		strcpy(path, basepath);
 		strcat(path, fdstr);
 		ret = readlink(path, buf, BUF_SIZE);
@@ -181,7 +182,7 @@ static bool invalid_streaming(Process *proc, bool stream){
 	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
 		ws = iter->data;
 
-		sprintf(sockfdstr, "%d", ws->fd);
+		sprintf(sockfdstr, "%lu", ws->fd);
 		strcpy(path, basepath);
 		strcat(path, sockfdstr);
 		ret = readlink(path, buf, BUF_SIZE);
@@ -201,13 +202,11 @@ static bool invalid_streaming(Process *proc, bool stream){
 
 static int parse_net_lines(FILE *netfile, const char *sock_inode, char *rem_addr){
 	char buf[BUF_SIZE];
-	char *inode_ptr;
 	char *rem_addr_ptr;
 	char *rem_addr_qtr;
 	size_t len;
 	
 	while(fgets(buf, BUF_SIZE, netfile)){
-		inode_ptr = buf;
 		rem_addr_ptr = buf;
 
 		if(strstr(buf, sock_inode)){
@@ -224,6 +223,7 @@ static int parse_net_lines(FILE *netfile, const char *sock_inode, char *rem_addr
 
 	return 1;
 } 
+
 static int get_sock_inode_by_sockfd(Process *proc, int sockfd, char *sock_inode){
 	char buf[BUF_SIZE] = {0};
 	char path[BUF_SIZE] = {0};
@@ -257,7 +257,7 @@ static int get_sock_inode_by_sockfd(Process *proc, int sockfd, char *sock_inode)
 	return 0;
 }
 
-static void get_ip_port_from_rem_addr(const char *rem_addr, int ipv4, char *ip, char *port){
+static void get_ip_port_from_rem_addr(char *rem_addr, int ipv4, char *ip, char *port){
 	char tmp[64] = {0};
 	uint16_t port_val;
 	char *ptr, *qtr;
@@ -391,6 +391,33 @@ static int get_rem_addr_by_sockfd(Process *proc, int sockfd, char *rem_addr, int
 	return 1;
 }
 
+static int get_ttypath(Process *proc){
+	// parsing /dev/pts to get tty which match tty_nr
+        char tty_path[PATH_MAX];
+        strcpy(tty_path, "/dev/pts/");
+
+        DIR *tty_dir = opendir(tty_path);
+        if(!tty_dir){
+                printf("tty dir open failed\n");
+                return -1;
+        }
+
+        struct dirent *tty_entry;
+        struct stat tty_stat;
+        while((tty_entry = readdir(tty_dir))){
+                strcpy(tty_path, "/dev/pts/");
+                strcat(tty_path, tty_entry->d_name);
+                stat(tty_path, &tty_stat);
+
+                if(proc->tty_nr == tty_stat.st_rdev){
+			strcpy(proc->tty_path, tty_path);	
+                        break;
+		}
+        }
+        closedir(tty_dir);
+	return 0;
+}
+
 bool if_parse_error(struct json_object* obj, Process *proc)
 {
     if(obj == NULL)
@@ -438,7 +465,7 @@ bool process_promise_pass(Process *proc){
 		fp = fopen ("file.json", "w+");
 		if(shdr[i].sh_size == 0)
 		{
-			send_signal(proc, SIGKILL, "config file is empty\n");
+			send_signal(proc, SIGKILL, "promise file is empty\n");
 			return false;
 		}
 		for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
@@ -450,7 +477,7 @@ bool process_promise_pass(Process *proc){
 	}
 	if(i == shNum) // No .test section exist
 	{
-		send_signal(proc, SIGKILL, "No config file exist\n");
+		send_signal(proc, SIGKILL, "No promise file exist\n");
 		return false;
 	}
 
@@ -805,9 +832,11 @@ Process *process_create(int pid){
 	proc->pid = pid;
 	proc->state = 0;
 	proc->flags = 0;
-	memset(proc->exe, 0, sizeof(PATH_MAX));
+	memset(proc->exe, 0, PATH_MAX);
 	proc->tracer = 0;
 	proc->last_run_cpu = -1;
+	proc->tty_nr = -1;
+	memset(proc->tty_path, 0, 32);
 
 	// perf related
 	proc->perf_fdlist = NULL;
@@ -1038,7 +1067,9 @@ int process_stat(Process *proc){
 		// skip session
 		ptr = strchr(ptr + 1, ' ');
 		
-		// skip tty_nr
+		// fetch tty_nr
+		ptr = ptr + 1;
+		sscanf(ptr, "%d", &proc->tty_nr);
 		ptr = strchr(ptr + 1, ' ');
 		
 		// skip tpgid
@@ -1404,7 +1435,13 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period){
 
 		pid_t child = fork();
 		if(child == 0){ 
+			int ret;
+
 			proc->tracer = child;
+			ret = get_ttypath(proc);
+			if(-1 == ret){
+				printf("tty not found\n");
+			}
 
 			if(!process_promise_pass(proc)){
 				process_destroy(proc);
@@ -1418,7 +1455,6 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period){
 			wsl_init(&proc->write_sample_list);
 			cache_init(&proc->cache, set_size, assoc);
 
-			int ret;
 			Perf_fd *perf_fd1, *perf_fd2;
 
 			// read process open fd list(read here because malloc memory cannot be shared with child)
