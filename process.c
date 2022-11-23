@@ -436,18 +436,23 @@ bool process_promise_pass(Process *proc){
 		size_t k;
 		FILE* fp;
 		fp = fopen ("file.json", "w+");
+		if(shdr[i].sh_size == 0)
+		{
+			send_signal(proc, SIGKILL, "config file is empty\n");
+			return false;
+		}
 		for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
 		{
 		    fprintf(fp,"%c", data[k]);
 		}   
-		if(fgetc(fp) == EOF) //file is empty
-		{
-			return false;
-		}
 		fclose(fp);
+		break;
 	}
 	if(i == shNum) // No .test section exist
+	{
+		send_signal(proc, SIGKILL, "No config file exist\n");
 		return false;
+	}
 
 	close(fd);
 	munmap(data, filesize);
@@ -515,7 +520,7 @@ bool process_promise_pass(Process *proc){
 	{
 		struct json_object* jvalue = json_object_array_get_idx(con, i);
 		struct json_object* ipport = json_object_object_get(jvalue, "ipport");
-		struct json_object* mask = json_object_object_get(jvalue, "mask");
+		struct json_object* mask = json_object_object_get(jvalue, "action_mask");
 		if(!if_parse_error(ipport, proc) || !if_parse_error(mask, proc))
 			return false;
 		char* ipport_ = json_object_get_string(ipport);
