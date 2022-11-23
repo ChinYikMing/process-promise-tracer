@@ -1353,7 +1353,7 @@ void *trp_monitoring(void *arg){
 }
 
 // skip pid of repeat if 'repeat' in /proc/[pid]/task directory since it is same as [pid]
-void scan_proc_dir(List *list, const char *dir, Process *repeat, double period){ 
+void scan_proc_dir(List *list, const char *dir, Process *repeat, int period){ 
     DIR *scan_dir = opendir(dir);
     DIRent *entry;
 
@@ -1560,6 +1560,8 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat, double period){
     }
 
     closedir(scan_dir);
+    usleep(period);
+    cpu_stat(cpu);        // CPU clock speed changes with its temperature
     return;
 }
 

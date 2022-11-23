@@ -38,7 +38,7 @@ int main(int argc, char **argv){
 			printf("received signal!\n");
 		}
 
-		scan_proc_dir(proc_list, PROC_DIR, NULL, 0.5);
+		scan_proc_dir(proc_list, PROC_DIR, NULL, 1000);
 		size_t proc_list_size = list_size(proc_list);
 		printf("process count: %zu\n", proc_list_size);
 	}
