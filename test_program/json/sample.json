@@ -13,7 +13,15 @@
 	"files":
 	[
 
+	],
+	"connections":
+	[
+			{
+					"ipport": "127.0.0.1:6443",
+					"action_mask": "000"
+			}
 	]
+
 }
 
   

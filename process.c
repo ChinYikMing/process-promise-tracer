@@ -412,6 +412,11 @@ struct data *data_new(char* val1, char* val2){
 }
 
 bool process_promise_pass(Process *proc){
+
+	if(proc->device_list != NULL)
+	{
+		return true;
+	}
     	Elf64_Ehdr  *elf;
 	Elf64_Shdr  *shdr;
 
@@ -423,18 +428,30 @@ bool process_promise_pass(Process *proc){
 	shdr = (Elf64_Shdr *) (data + elf->e_shoff);
 	char* strtab = (char *)(data + shdr[elf->e_shstrndx].sh_offset);
 	int shNum = elf->e_shnum;
-	for(int i=0;i<shNum;i++)
+	int i;
+	for(i=0;i<shNum;i++)
 	{   
 		if(0 != strcmp(&strtab[shdr[i].sh_name], ".test"))
 		    continue;
 		size_t k;
 		FILE* fp;
 		fp = fopen ("file.json", "w+");
+		if(shdr[i].sh_size == 0)
+		{
+			send_signal(proc, SIGKILL, "config file is empty\n");
+			return false;
+		}
 		for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
 		{
 		    fprintf(fp,"%c", data[k]);
 		}   
 		fclose(fp);
+		break;
+	}
+	if(i == shNum) // No .test section exist
+	{
+		send_signal(proc, SIGKILL, "No config file exist\n");
+		return false;
 	}
 
 	close(fd);
@@ -450,6 +467,7 @@ bool process_promise_pass(Process *proc){
 
 	device_list_init(&proc->device_list);
 	access_file_list_init(&proc->access_file_list);
+	connection_list_init(&proc->connection_list);
 
 	obj = json_tokener_parse(json);
 
@@ -493,6 +511,25 @@ bool process_promise_pass(Process *proc){
 		node = node_create(d);
 		list_push_back(proc->access_file_list, node);
 	}
+
+	struct json_object* con = json_object_object_get(obj, "connections");
+	if(!if_parse_error(con, proc))
+		return false;
+	len = json_object_array_length(con);
+	for(int i=0; i<len; i++)
+	{
+		struct json_object* jvalue = json_object_array_get_idx(con, i);
+		struct json_object* ipport = json_object_object_get(jvalue, "ipport");
+		struct json_object* mask = json_object_object_get(jvalue, "action_mask");
+		if(!if_parse_error(ipport, proc) || !if_parse_error(mask, proc))
+			return false;
+		char* ipport_ = json_object_get_string(ipport);
+		char* mask_ = json_object_get_string(mask);
+		d = data_new(ipport_, mask_);
+		node = node_create(d);
+		list_push_back(proc->connection_list, node);
+	}
+
 	munmap(json, fs);
 	return true;
 }
@@ -519,6 +556,19 @@ int access_file_list_init(List** access_file_list)
 	*access_file_list = tmp;
 	return 0;
 }
+
+int connection_list_init(List** connection_list)
+{
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	*connection_list = tmp;
+	return 0;
+}
+
 
 
 Fd *fd_create(int fd, const char *path){
