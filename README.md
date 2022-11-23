@@ -61,9 +61,18 @@ $systemctl status process-promise-tracerd
 
 ### Program Configuration file
 * located in /etc/process_promise_tracer.conf
-* Each line is a program name to be traced
+* There are two sections in the config file: [Daemon] and [Untrusted Program]
+* [Daemon] is for daemon config and [Untrusted Program] is for untrusted program name to be traced
 * Sample configuration file, only /usr/bin/test program will be traced by the daemon program
 ```
+[Daemon]
+assoc=8
+block_bit=20
+set_bit=6
+perf_sample_period=3000
+scan_procfs_period=1000
+
+[Untrusted Program]
 /usr/bin/test
 ```
 
