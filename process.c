@@ -419,8 +419,8 @@ struct data *data_new(char* val1, char* val2){
 	if(!d)
 		return NULL;
 
-	d->val1 = val1;
-	d->val2 = val2;
+	d->val1 = strdup(val1);
+	d->val2 = strdup(val2);
 	return d;
 }
 
@@ -596,10 +596,6 @@ Fd *fd_create(int fd, const char *path){
 	return _fd;
 }
 
-void fd_destroy(Fd *fd){
-	free(fd);
-}
-
 int fdlist_init(List **fdlist){
 	List *tmp= malloc(sizeof(List));
 	if(!tmp)
@@ -655,13 +651,140 @@ int wsl_init(List **write_sample_list){
 }
 
 void fdlist_destroy(List *fdlist){
-	Node *iter;
+	if(!fdlist)
+		return;
+
+	Node *iter, *prev;
 	Fd *fd;
 
-	LIST_FOR_EACH(fdlist, iter){
-		fd = LIST_ENTRY(iter, Fd);
-		fd_destroy(fd);
+	iter = fdlist->head;
+	while(iter){
+		prev = iter;
+		iter = iter->next;
+		fd = (Fd *) prev->data;
+		free(fd);
+		free(prev);
 	}
+
+	free(fdlist);
+}
+
+void devbuflist_destroy(List *devbuflist){
+	if(!devbuflist)
+		return;
+
+	Node *iter, *prev;
+	Devbuf *devbuf;
+
+	iter = devbuflist->head;
+	while(iter){
+		prev = iter;
+		iter = iter->next;
+		devbuf = (Devbuf *) prev->data;
+		free(devbuf);
+		free(prev);
+	}
+
+	free(devbuflist);
+}
+
+void devlist_destroy(List *device_list){
+	if(!device_list)
+		return;
+
+	Node *iter, *prev;
+	struct data *d;
+
+	iter = device_list->head;
+	while(iter){
+		prev = iter;
+		iter = iter->next;
+		d = (struct data *) prev->data;
+		free(d->val1);
+		free(d->val2);
+		free(d);
+		free(prev);
+	}
+
+	free(device_list);
+}
+
+void accessfilelist_destroy(List *access_file_list){
+	if(!access_file_list)
+		return;
+
+	Node *iter, *prev;
+	struct data *d;
+
+	iter = access_file_list->head;
+	while(iter){
+		prev = iter;
+		iter = iter->next;
+		d = (struct data *) prev->data;
+		free(d->val1);
+		free(d->val2);
+		free(d);
+		free(prev);
+	}
+
+	free(access_file_list);
+}
+
+void connectionlist_destroy(List *connection_list){
+	if(!connection_list)
+		return;
+
+	Node *iter, *prev;
+	struct data *d;
+
+	iter = connection_list->head;
+	while(iter){
+		prev = iter;
+		iter = iter->next;
+		d = (struct data *) prev->data;
+		free(d->val1);
+		free(d->val2);
+		free(d);
+		free(prev);
+	}
+
+	free(connection_list);
+}
+
+void perffdlist_destroy(List *perf_fdlist){
+	if(!perf_fdlist)
+		return;
+
+	Node *iter, *prev;
+	Perf_fd *perf_fd;
+
+	iter = perf_fdlist->head;
+	while(iter){
+		prev = iter;
+		iter = iter->next;
+		perf_fd = (Perf_fd *) prev->data;
+		free(perf_fd);
+		free(prev);
+	}
+
+	free(perf_fdlist);
+}
+
+void writesamplelist_destroy(List *write_sample_list){
+	if(!write_sample_list)
+		return;
+
+	Node *iter = write_sample_list->head, *prev;
+	WriteSample *write_sample;
+	for(int i = 0; i < 8; i++){
+		write_sample = (WriteSample *) iter->data;
+		free(write_sample);
+		prev = iter;
+		iter = iter->next;
+		free(prev);
+	}
+
+	free(write_sample_list);
 }
 
 int cache_init(cacheline ***cache, int set_size, int assoc){
@@ -707,6 +830,22 @@ Node *list_get_node_by_pid(List *list, pid_t pid, bool *pre_exist){
 	return NULL;
 }
 
+Node *list_get_freenode(List *list, bool *free_node_found){
+	Node *node = NULL;
+	Process *proc = NULL;
+
+	LIST_FOR_EACH(list, node){
+		proc = LIST_ENTRY(node, Process);
+		if('X' == proc->state){
+			*free_node_found = true;
+			return node;
+		}
+	}
+
+	*free_node_found = false;
+	return NULL;
+}
+
 Node *list_get_node_by_fd(List *list, int _fd){
 	Node *node = NULL;
 	Fd *fd = NULL;
@@ -733,10 +872,6 @@ Devbuf *devbuf_create(const char *buf_start, size_t buf_len){
 	return devbuf;
 }
 
-void devbuf_destroy(Devbuf *devbuf){
-	free(devbuf);
-}
-
 int devbuflist_init(List **devbuflist){
 	List *tmp = malloc(sizeof(List));
 	if(!tmp)
@@ -746,16 +881,6 @@ int devbuflist_init(List **devbuflist){
 
 	*devbuflist = tmp;
 	return 0;
-}
-
-void devbuflist_destroy(List *devbuflist){
-	Node *iter;
-	Devbuf *devbuf;
-
-	LIST_FOR_EACH(devbuflist, iter){
-		devbuf = LIST_ENTRY(iter, Devbuf);
-		devbuf_destroy(devbuf);
-	}
 }
 
 bool process_exist(Process *proc){
@@ -833,17 +958,27 @@ Process *process_create(int pid){
 	if(proc == MAP_FAILED)
 		return NULL;
 
+	memset(proc->tty_path, 0, 32);
+	memset(proc->exe, 0, PATH_MAX);
 	proc->pid = pid;
 	proc->state = 0;
 	proc->flags = 0;
-	memset(proc->exe, 0, PATH_MAX);
 	proc->tracer = 0;
 	proc->last_run_cpu = -1;
 	proc->tty_nr = -1;
-	memset(proc->tty_path, 0, 32);
+	proc->hit_cnt = 0;
+	proc->miss_cnt = 0;
+	proc->eviction_cnt = 0;
 
-	// perf related
 	proc->perf_fdlist = NULL;
+	proc->devbuflist = NULL;
+	proc->device_list = NULL;
+	proc->access_file_list = NULL;
+	proc->connection_list = NULL;
+	proc->perf_fdlist = NULL;
+	proc->write_sample_list = NULL;
+	proc->cache = NULL;
+
 	pthread_spin_init(&proc->wsl_lock, PTHREAD_PROCESS_SHARED);
 
 	return proc;
@@ -858,16 +993,30 @@ void process_destroy(Process *proc){
 void process_clean(Process *proc){
 	fdlist_destroy(proc->fdlist);
 	devbuflist_destroy(proc->devbuflist);
-	proc->pid = -1;
-	proc->state = 'X';
-	proc->flags = 0;
-	memset(proc->exe, 0, sizeof(PATH_MAX));
-	proc->tracer = 0;
-	proc->perf_fdlist = NULL;
+	devlist_destroy(proc->device_list);
+	accessfilelist_destroy(proc->access_file_list);
+	connectionlist_destroy(proc->connection_list);
+	perffdlist_destroy(proc->perf_fdlist);
+	writesamplelist_destroy(proc->write_sample_list);
+	cache_destroy(proc->cache, set_size);
+
+	proc->fdlist = NULL;
 	proc->devbuflist = NULL;
 	proc->device_list = NULL;
 	proc->access_file_list = NULL;
+	proc->connection_list = NULL;
+	proc->perf_fdlist = NULL;
+	proc->write_sample_list = NULL;
 	proc->cache = NULL;
+
+	memset(proc->exe, 0, PATH_MAX);
+	memset(proc->tty_path, 0, 32);
+	proc->tty_nr = 0;
+	proc->last_run_cpu = 0;
+	proc->pid = -1;
+	proc->state = 'X';
+	proc->flags = 0;
+	proc->tracer = 0;
 	proc->hit_cnt = 0;
 	proc->miss_cnt = 0;
 	proc->eviction_cnt = 0;
@@ -1357,7 +1506,7 @@ void *trp_monitoring(void *arg){
 }
 
 // skip pid of repeat if 'repeat' in /proc/[pid]/task directory since it is same as [pid]
-void scan_proc_dir(List *list, const char *dir, Process *repeat){ 
+void scan_proc_dir(List *process_list, const char *dir, Process *repeat){ 
     DIR *scan_dir = opendir(dir);
     DIRent *entry;
 
@@ -1400,33 +1549,50 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat){
         strcat(pid_path, "task");
 
 	bool pre_exist;
+	bool free_node_found;
 
-	Node *proc_node = list_get_node_by_pid(list, pid, &pre_exist);
+	Node *proc_node = list_get_node_by_pid(process_list, pid, &pre_exist);
 	Process *proc = NULL;
 	if(!proc_node){
-		proc = process_create(pid);
-		proc_node = node_create((void *) proc);
+		proc_node = list_get_freenode(process_list, &free_node_found);    // previous dead process is considered as free node
+		if(!proc_node){
+			proc = process_create(pid);
+			proc_node = node_create((void *) proc);
+		} else {
+			proc = proc_node->data;
+			proc->pid = pid;
+		}
 	} else {
 		proc = proc_node->data;
+		free_node_found = false;
 	}
+
 	process_stat(proc);
 
-	scan_proc_dir(list, pid_path, proc);
-
-	if(process_is_stop(proc))
-		continue;
-
 	if(process_is_kernel_thread(proc)){
-		process_destroy(proc);
-		node_destroy(proc_node);
+		if(free_node_found){
+			process_clean(proc);
+		} else {
+			process_destroy(proc);
+			node_destroy(proc_node);
+		}
 		continue;
 	}
 
 	if(process_is_trusted(proc)){
-		process_destroy(proc);
-		node_destroy(proc_node);
+		if(free_node_found){
+			process_clean(proc);
+		} else {
+			process_destroy(proc);
+			node_destroy(proc_node);
+		}
 		continue;
 	}
+
+	if(process_is_stop(proc))
+		continue;
+
+	scan_proc_dir(process_list, pid_path, proc);
 
 	if(!pre_exist){
 #ifdef DAEMON
@@ -1448,8 +1614,7 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat){
 			}
 
 			if(!process_promise_pass(proc)){
-				process_destroy(proc);
-				node_destroy(proc_node);
+				process_clean(proc);
 				exit(EXIT_FAILURE);
 			}
 
@@ -1549,11 +1714,14 @@ void scan_proc_dir(List *list, const char *dir, Process *repeat){
 					printSummary(proc->hit_cnt, proc->miss_cnt, proc->eviction_cnt);
 					process_clean(proc);
 					printf("tracee exit\n");
-					_exit(EXIT_SUCCESS);
+					exit(EXIT_SUCCESS);
 				}
 			}
 		} else {
-			list_push_back(list, proc_node);
+			if(!free_node_found){
+				//printf("not found free node\n");
+				list_push_back(process_list, proc_node);
+			}
 		}
 	} else { // exist before
 		if(!process_is_zombie(proc)){

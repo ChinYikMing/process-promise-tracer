@@ -30,9 +30,7 @@ typedef struct list {
 size_t list_size(List *list);
 int list_push_back(List *list, Node *node);
 int list_push_front(List *list, Node *node);
-int list_delete(List *list, int id);
 Node *node_create(void *data);
 void node_destroy(Node *node);
-Node *list_get_node_by_pid(List *list, pid_t pid, bool *pre_exist);
 
 #endif

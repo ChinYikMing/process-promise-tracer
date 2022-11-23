@@ -41,7 +41,7 @@ typedef struct process {
 
 Process *process_create(int pid);
 void process_destroy(Process *proc);
-void scan_proc_dir(List *list, const char *dir, Process *repeat);
+void scan_proc_dir(List *process_list, const char *dir, Process *repeat);
 
 pid_t self_pid;
 char self_name[16];

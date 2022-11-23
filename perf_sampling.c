@@ -91,7 +91,7 @@ int perf_event_unregister(Process *proc){
 		perf_fd = LIST_ENTRY(iter, Perf_fd);
 		//printf("fd: %d, %p\n", perf_fd->fd, perf_fd->rb);
 		close(perf_fd->fd);
-		//perf_event_rb_put(perf_fd->rb);
+		perf_event_rb_put(perf_fd->rb);
 	}
 
 	return 0;
@@ -173,12 +173,7 @@ void perf_event_rb_put(void *rb){
 	if(!rb)
 		return;
 	
-	int ret = munmap(rb, PERF_RB_SIZE);
-	if(ret == -1){
-		perror("munmap");
-	} else {
-		printf("sage\n");
-	}
+	munmap(rb, PERF_RB_SIZE);
 	return;
 }
 

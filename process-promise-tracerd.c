@@ -25,15 +25,15 @@ int main(int argc, char **argv){
 	self_pid = getpid();
 	sprintf(self_name, "%d", self_pid);
 
-	List *proc_list = malloc(sizeof(List));
-	if(!proc_list){
+	List *process_list = malloc(sizeof(List));
+	if(!process_list){
 		log_open();
 		syslog(LOG_ERR, LOG_PREFIX"process list malloc failed");
 		log_close();
 
 		exit(EXIT_FAILURE);
 	}
-	LIST_INIT(proc_list);
+	LIST_INIT(process_list);
 
 	int scan_procfs_period; 
 	Node *iter;
@@ -56,9 +56,21 @@ int main(int argc, char **argv){
 			printf("received signal!\n");
 		}
 
-		scan_proc_dir(proc_list, PROC_DIR, NULL);
-		size_t proc_list_size = list_size(proc_list);
+		scan_proc_dir(process_list, PROC_DIR, NULL);
+		size_t proc_list_size = list_size(process_list);
 		printf("process count: %zu\n", proc_list_size);
+
+		/*
+		Node *iter;
+		Process *proc;
+		int i = 1;
+		printf("list size: %d\n", list_size(process_list));
+		LIST_FOR_EACH(process_list, iter){
+			proc = LIST_ENTRY(iter, Process);
+			printf("proc %d(%d), state: %c, exec: %s\n", i, proc->pid, proc->state, proc->exe);
+			i++;
+		}
+		*/
 	}
 
 	// never reach here
