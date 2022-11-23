@@ -6,6 +6,7 @@ all: process-promise-tracerd.c list.c process.c signal.c perf_sampling.c config.
 	$(CC) $(CFLAGS) $^ -o process-promise-tracerd $(CLIBS)
 
 install:
+ifeq (1, $(shell ./perf_event_open_support.sh))
 	#process-promise-tracerd installation
 	cp process-promise-tracerd /usr/sbin/
 	cp process_promise_tracer.conf /etc/process_promise_tracer.conf 
@@ -20,6 +21,9 @@ install:
 	#logrotated installation
 	cp process-promise-tracerd.logrotate.conf /etc/logrotate.d/process-promise-tracerd
 	systemctl restart logrotate
+else
+	echo "The kernel do not support perf_event_open system call"
+endif
 
 uninstall:
 	#logrotated uninstallation
