@@ -43,7 +43,19 @@ Perf_fd *perf_event_register(Process *proc, uint32_t type, event_t event, uint64
     attr.exclude_user = 0;
     attr.exclude_kernel = 1;
     attr.precise_ip = 3;
-    attr.sample_period = 3000;
+
+    uint64_t sample_period;
+    Node *iter;
+    Conf *c;
+    LIST_FOR_EACH(cf->list, iter){
+            c = LIST_ENTRY(iter, Conf);
+            if(0 == strcmp(c->key, "perf_sample_period")){
+                    sscanf(c->val, "%llu", &sample_period);
+                    break;
+            }
+    }
+    attr.sample_period = sample_period;
+
     attr.wakeup_events = 1;
     //attr.inherit = 1;
     
