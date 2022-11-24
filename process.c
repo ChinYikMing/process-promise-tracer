@@ -1592,7 +1592,7 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 	if(process_is_stop(proc))
 		continue;
 
-	scan_proc_dir(process_list, pid_path, proc);
+	//scan_proc_dir(process_list, pid_path, proc);
 
 	if(!pre_exist){
 #ifdef DAEMON
