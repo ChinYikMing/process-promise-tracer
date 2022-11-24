@@ -787,7 +787,7 @@ void writesamplelist_destroy(List *write_sample_list){
 	free(write_sample_list);
 }
 
-int cache_init(cacheline ***cache, int set_size, int assoc){
+int cache_init(cacheline ***cache){
 	if(0 == assoc && 0 == block_bit && 0 == set_bit && 0 == set_size){
 		Node *iter;
 		Conf *c;
@@ -1361,7 +1361,7 @@ static unsigned long get_usleep_time(Process *proc){
 	unsigned long clock_speed_MHz = cpu[last_run_cpu].clock_speed;
 	unsigned long long clock_speed = clock_speed_MHz * 1024 * 1024;
 	unsigned long msec_per_sec = 1000000;
-	double ratio = ((double) clock_speed / 2) / clock_speed;
+	double ratio = ((double) clock_speed / 10) / clock_speed;
 
 	/*
 	for(int i = 0; i < 8; i++){
@@ -1593,7 +1593,7 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 		continue;
 
 	//scan_proc_dir(process_list, pid_path, proc);
-
+	
 	if(!pre_exist){
 #ifdef DAEMON
 		log_open();
@@ -1622,7 +1622,7 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 			devbuflist_init(&proc->devbuflist);
 			perffdlist_init(&proc->perf_fdlist);
 			wsl_init(&proc->write_sample_list);
-			cache_init(&proc->cache, set_size, assoc);
+			cache_init(&proc->cache);
 
 			Perf_fd *perf_fd1, *perf_fd2;
 
