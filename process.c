@@ -4,6 +4,7 @@
 #include "list.h"
 #include "process.h"
 #include <poll.h>
+#include <libgen.h>
 #include "signal.h"
 #include "perf_sampling.h"
 #include "perf_va.h"
@@ -78,112 +79,6 @@ static bool using_camera(Process *proc){
 
 static bool load_evt_high(Process *proc){
 	return (proc->hit_cnt > 0);
-}
-
-static int invalid_write(Process *proc, bool save){
-	List *access_file_list = proc->access_file_list;
-	List *wsl = proc->write_sample_list;
-	Node *iter, *fileiter;
-	struct data *filedata;
-	size_t i;
-	WriteSample *ws;
-	char buf[BUF_SIZE] = {0};
-	char basepath[BUF_SIZE] = {0};
-	char path[BUF_SIZE] = {0};
-	int ret;
-	char pidstr[32] = {0};
-	char fdstr[32] = {0};
-
-	sprintf(pidstr, "%d", proc->pid);
-
-	strcpy(basepath, PROC_DIR);
-	strcat(basepath, "/");
-	strcat(basepath, pidstr);
-	strcat(basepath, "/");
-	strcat(basepath, "fd");
-	strcat(basepath, "/");
-
-	if(save && 0 == list_size(access_file_list)) // no description of access file => break the promise
-		return -ENOENT;
-
-	pthread_spin_lock(&proc->wsl_lock);
-	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
-		ws = iter->data;
-
-		sprintf(fdstr, "%lu", ws->fd);
-		strcpy(path, basepath);
-		strcat(path, fdstr);
-		ret = readlink(path, buf, BUF_SIZE);
-		if(-1 == ret)
-			continue;
-		buf[ret] = 0;
-
-		LIST_FOR_EACH(access_file_list, fileiter){
-			filedata = LIST_ENTRY(fileiter, struct data);
-			if(0 == strcmp(filedata->val1, buf)){
-				if(false == get_action_bit(filedata->val2, 1)){ // bit1 is write bit
-					pthread_spin_unlock(&proc->wsl_lock);
-					return -EINVAL;
-				} else {
-					pthread_spin_unlock(&proc->wsl_lock);
-					return 0;
-				}
-			}
-		}
-
-		//printf("fd: %lu, buf: %lu, len: %lu\n", ws->fd, ws->buf, ws->len);
-	}
-	pthread_spin_unlock(&proc->wsl_lock);
-
-	return -EINVAL;
-}
-
-static bool invalid_streaming(Process *proc, bool stream){
-	List *wsl = proc->write_sample_list;
-	Node *iter;
-	size_t i;
-	WriteSample *ws;
-	char buf[BUF_SIZE] = {0};
-	char basepath[BUF_SIZE] = {0};
-	char path[BUF_SIZE] = {0};
-	int ret;
-	char pidstr[32] = {0};
-	char sockfdstr[32] = {0};
-
-	sprintf(pidstr, "%d", proc->pid);
-
-	strcpy(basepath, PROC_DIR);
-	strcat(basepath, "/");
-	strcat(basepath, pidstr);
-	strcat(basepath, "/");
-	strcat(basepath, "fd");
-	strcat(basepath, "/");
-
-	/*
-	if(0 == list_size(connections_list)) // no description of access file => break the promise
-		return -ENOENT;
-		*/
-
-	pthread_spin_lock(&proc->wsl_lock);
-	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
-		ws = iter->data;
-
-		sprintf(sockfdstr, "%lu", ws->fd);
-		strcpy(path, basepath);
-		strcat(path, sockfdstr);
-		ret = readlink(path, buf, BUF_SIZE);
-		if(-1 == ret)
-			continue;
-		buf[ret] = 0;
-
-		if(strstr(buf, "socket"))
-			return true;
-
-		//printf("fd: %lu, buf: %lu, len: %lu\n", ws->fd, ws->buf, ws->len);
-	}
-	pthread_spin_unlock(&proc->wsl_lock);
-
-	return false;
 }
 
 static int parse_net_lines(FILE *netfile, const char *sock_inode, char *rem_addr){
@@ -264,7 +159,6 @@ static void get_ip_port_from_rem_addr(char *rem_addr, int ipv4, char *ip, char *
                 for(int i = 4; i > 0; i--){
                         memset(tmp, 0, 64);
                         sprintf(tmp, "%u", *rtr);
-			printf("tmp: %s\n", tmp);
 
                         if(i == 1){
                                 strcat(ip, tmp);
@@ -377,6 +271,137 @@ static int get_rem_addr_by_sockfd(Process *proc, int sockfd, char *rem_addr, int
 	return 1;
 }
 
+static bool invalid_write(Process *proc, bool save){
+	List *access_file_list = proc->access_file_list;
+	List *wsl = proc->write_sample_list;
+
+	if((save && 0 == list_size(access_file_list)) || // not specified to write file in promise but tend to write file
+	   (!save && list_size(wsl) > 0))               // should not have any write sample if not tend to write file
+		return true;
+
+	if(!save && 0 == list_size(wsl))               // no write sample => commitment
+		return false;
+
+	Node *iter, *fileiter;
+	struct data *filedata;
+	size_t i;
+	WriteSample *ws;
+	char buf[BUF_SIZE] = {0};
+	char basepath[BUF_SIZE] = {0};
+	char path[BUF_SIZE] = {0};
+	int ret;
+	char pidstr[32] = {0};
+	char fdstr[32] = {0};
+
+	sprintf(pidstr, "%d", proc->pid);
+
+	strcpy(basepath, PROC_DIR);
+	strcat(basepath, "/");
+	strcat(basepath, pidstr);
+	strcat(basepath, "/");
+	strcat(basepath, "fd");
+	strcat(basepath, "/");
+
+	pthread_spin_lock(&proc->wsl_lock);
+	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
+		ws = iter->data;
+
+		sprintf(fdstr, "%lu", ws->fd);
+		strcpy(path, basepath);
+		strcat(path, fdstr);
+		ret = readlink(path, buf, BUF_SIZE);
+		if(-1 == ret)
+			continue;
+		buf[ret] = 0;
+
+		LIST_FOR_EACH(access_file_list, fileiter){
+			filedata = LIST_ENTRY(fileiter, struct data);
+			if(0 == strcmp(filedata->val1, basename(buf))){
+				pthread_spin_unlock(&proc->wsl_lock);
+				return false;
+			}
+		}
+
+		//printf("fd: %lu, buf: %lu, len: %lu\n", ws->fd, ws->buf, ws->len);
+	}
+	pthread_spin_unlock(&proc->wsl_lock);
+
+	return true;
+}
+
+static bool invalid_streaming(Process *proc, bool stream){
+	List *connection_list = proc->connection_list;
+	List *swsl = proc->socket_write_sample_list;
+
+	if((stream && 0 == list_size(connection_list)) || // not specified connections in promise but tend to write data via connections
+	   (!stream && list_size(swsl) > 0))               // should not have any write sample if not tend to stream
+		return true;
+
+	if(!stream && 0 == list_size(swsl))               // no socket write sample => commitment
+		return false;
+
+	Node *iter, *conn_iter;
+	struct data *conn;
+	size_t i;
+	WriteSample *ws;
+	char buf[BUF_SIZE] = {0};
+	char basepath[BUF_SIZE] = {0};
+	char path[BUF_SIZE] = {0};
+	int ret;
+	char pidstr[32] = {0};
+	char sockfdstr[32] = {0};
+
+	sprintf(pidstr, "%d", proc->pid);
+
+	strcpy(basepath, PROC_DIR);
+	strcat(basepath, "/");
+	strcat(basepath, pidstr);
+	strcat(basepath, "/");
+	strcat(basepath, "fd");
+	strcat(basepath, "/");
+
+	pthread_spin_lock(&proc->swsl_lock);
+	for(i = 0, iter = swsl->head; i < list_size(swsl); i++, iter = iter->next){
+		ws = iter->data;
+
+		sprintf(sockfdstr, "%lu", ws->fd);
+		strcpy(path, basepath);
+		strcat(path, sockfdstr);
+		ret = readlink(path, buf, BUF_SIZE);
+		if(-1 == ret)
+			continue;
+		buf[ret] = 0;
+
+		if(0 == strncmp(buf, "socket:[", 8)){
+			char rem_addr[64] = {0};
+			char ip[64] = {0};
+			char port[32] = {0};
+			char ipport[128];
+			int tcp;
+			int ipv4;
+			get_rem_addr_by_sockfd(proc, ws->fd, rem_addr, &tcp, &ipv4);
+			get_ip_port_from_rem_addr(rem_addr, ipv4, ip, port);
+			strcpy(ipport, ip);
+			strcat(ipport, ":");
+			strcat(ipport, port);
+
+			LIST_FOR_EACH(connection_list, conn_iter){
+				conn = LIST_ENTRY(conn_iter, struct data);
+				if(0 == strcmp(conn->val1, ipport)){
+					pthread_spin_unlock(&proc->swsl_lock);
+					return false;
+				}
+			}
+		}
+
+		//printf("fd: %lu, buf: %lu, len: %lu\n", ws->fd, ws->buf, ws->len);
+	}
+	pthread_spin_unlock(&proc->swsl_lock);
+
+	return true;
+}
+
+
 static int get_ttypath(Process *proc){
 	// parsing /dev/pts to get tty which match tty_nr
         char tty_path[PATH_MAX];
@@ -408,7 +433,7 @@ bool if_parse_error(struct json_object* obj, Process *proc)
 {
     if(obj == NULL)
     {
-        send_signal(proc, SIGSTOP, "JSON file error\n");
+        send_signal(proc, SIGSTOP, "JSON promise file error\n");
 		return false;
     }
 	return true;
@@ -451,7 +476,7 @@ bool process_promise_pass(Process *proc){
 		fp = fopen ("file.json", "w+");
 		if(shdr[i].sh_size == 0)
 		{
-			send_signal(proc, SIGKILL, "promise file is empty\n");
+			send_signal(proc, SIGKILL, "JSON promise file is empty\n");
 			return false;
 		}
 		for (k = shdr[i].sh_offset; k < shdr[i].sh_offset + shdr[i].sh_size; k++) 
@@ -463,7 +488,7 @@ bool process_promise_pass(Process *proc){
 	}
 	if(i == shNum) // No .test section exist
 	{
-		send_signal(proc, SIGKILL, "No promise file exist\n");
+		send_signal(proc, SIGKILL, "No JSON promise file exist\n");
 		return false;
 	}
 
@@ -645,8 +670,30 @@ int wsl_init(List **write_sample_list){
 		dummy_node = node_create(dummy_sample);
 		list_push_back(tmp, dummy_node);
 	}
+	tmp->size = 0;
 
 	*write_sample_list = tmp;
+	return 0;
+}
+
+int swsl_init(List **socket_write_sample_list){
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	// create 8 dummy node
+	Node *dummy_node;
+	WriteSample *dummy_sample;
+	for(int i = 0; i < 8; i++){
+		dummy_sample = write_sample_create(0, 0, 0);
+		dummy_node = node_create(dummy_sample);
+		list_push_back(tmp, dummy_node);
+	}
+	tmp->size = 0;
+
+	*socket_write_sample_list = tmp;
 	return 0;
 }
 
@@ -770,7 +817,7 @@ void perffdlist_destroy(List *perf_fdlist){
 	free(perf_fdlist);
 }
 
-void writesamplelist_destroy(List *write_sample_list){
+void wsl_destroy(List *write_sample_list){
 	if(!write_sample_list)
 		return;
 
@@ -785,6 +832,23 @@ void writesamplelist_destroy(List *write_sample_list){
 	}
 
 	free(write_sample_list);
+}
+
+void swsl_destroy(List *socket_write_sample_list){
+	if(!socket_write_sample_list)
+		return;
+
+	Node *iter = socket_write_sample_list->head, *prev;
+	WriteSample *write_sample;
+	for(int i = 0; i < 8; i++){
+		write_sample = (WriteSample *) iter->data;
+		free(write_sample);
+		prev = iter;
+		iter = iter->next;
+		free(prev);
+	}
+
+	free(socket_write_sample_list);
 }
 
 int cache_init(cacheline ***cache){
@@ -977,15 +1041,18 @@ Process *process_create(int pid){
 	proc->connection_list = NULL;
 	proc->perf_fdlist = NULL;
 	proc->write_sample_list = NULL;
+	proc->socket_write_sample_list = NULL;
 	proc->cache = NULL;
 
 	pthread_spin_init(&proc->wsl_lock, PTHREAD_PROCESS_SHARED);
+	pthread_spin_init(&proc->swsl_lock, PTHREAD_PROCESS_SHARED);
 
 	return proc;
 }
 
 void process_destroy(Process *proc){
 	pthread_spin_destroy(&proc->wsl_lock);
+	pthread_spin_destroy(&proc->swsl_lock);
 	munmap(proc, PROC_SIZE);
 	return;
 }
@@ -997,7 +1064,8 @@ void process_clean(Process *proc){
 	accessfilelist_destroy(proc->access_file_list);
 	connectionlist_destroy(proc->connection_list);
 	perffdlist_destroy(proc->perf_fdlist);
-	writesamplelist_destroy(proc->write_sample_list);
+	wsl_destroy(proc->write_sample_list);
+	swsl_destroy(proc->socket_write_sample_list);
 	cache_destroy(proc->cache, set_size);
 
 	proc->fdlist = NULL;
@@ -1007,6 +1075,7 @@ void process_clean(Process *proc){
 	proc->connection_list = NULL;
 	proc->perf_fdlist = NULL;
 	proc->write_sample_list = NULL;
+	proc->socket_write_sample_list = NULL;
 	proc->cache = NULL;
 
 	memset(proc->exe, 0, PATH_MAX);
@@ -1136,20 +1205,6 @@ void process_updateFdList(Process *proc){
 
 	    ssize_t size = readlink(fd_file, fd_path, PATH_MAX);
 	    fd_path[size] = 0;
-	    /*
-	    if(strstr(fd_path, "socket")){
-	    	char rem_addr[32] = {0};
-	    	char ip[32] = {0};
-	    	char port[32] = {0};
-		int tcp;
-		int ipv4;
-		get_rem_addr_by_sockfd(proc, fd, rem_addr, &tcp, &ipv4);
-		printf("rem_addr: %s, tcp: %d, ipv4: %d\n", rem_addr, tcp, ipv4);
-		get_ip_port_from_rem_addr(rem_addr, ipv4, ip, port);
-		printf("ip: %s, port: %s\n", ip, port);
-	    }
-	    */
-
 	    fd_node = list_get_node_by_fd(proc->fdlist, fd);
 	    if(fd_node) {
 		    _fd = fd_node->data;
@@ -1422,6 +1477,58 @@ void *load_evt_monitoring(void *arg){
 	}
 }
 
+static bool is_tty_write_sample(Process *proc, unsigned long fd){
+	char buf[BUF_SIZE] = {0};
+	char path[BUF_SIZE] = {0};
+	char pidstr[32] = {0};
+	char fdstr[32] = {0};
+	int ret;
+
+	sprintf(pidstr, "%d", proc->pid);
+	sprintf(fdstr, "%lu", fd);
+
+	strcpy(path, PROC_DIR);
+	strcat(path, "/");
+	strcat(path, pidstr);
+	strcat(path, "/");
+	strcat(path, "fd");
+	strcat(path, "/");
+	strcat(path, fdstr);
+
+	ret = readlink(path, buf, BUF_SIZE);
+	if(-1 == ret)
+		return false;
+	buf[ret] = 0;
+
+	return (0 == strncmp(buf, "/dev/pts/", 9));
+}
+
+static bool is_socket_write_sample(Process *proc, unsigned long fd){
+	char buf[BUF_SIZE] = {0};
+	char path[BUF_SIZE] = {0};
+	char pidstr[32] = {0};
+	char fdstr[32] = {0};
+	int ret;
+
+	sprintf(pidstr, "%d", proc->pid);
+	sprintf(fdstr, "%lu", fd);
+
+	strcpy(path, PROC_DIR);
+	strcat(path, "/");
+	strcat(path, pidstr);
+	strcat(path, "/");
+	strcat(path, "fd");
+	strcat(path, "/");
+	strcat(path, fdstr);
+
+	ret = readlink(path, buf, BUF_SIZE);
+	if(-1 == ret)
+		return false;
+	buf[ret] = 0;
+
+	return (0 == strncmp(buf, "socket:[", 8));
+}
+
 void *trp_monitoring(void *arg){
 	pthread_data_t *thread_data = (pthread_data_t *) arg;
 	Process *proc = (Process *) thread_data->proc;
@@ -1466,22 +1573,45 @@ void *trp_monitoring(void *arg){
 			ptr = ((char *) ptr) + sizeof(unsigned long);
 			len = *((unsigned long *) ptr);
 
-			pthread_spin_lock(&proc->wsl_lock);
-			// records only latest 8 samples
-			if(8 == list_size(proc->write_sample_list))
-				proc->write_sample_list->size = 0;
+			if(is_tty_write_sample(proc, fd))
+				continue;
 
-			iter = proc->write_sample_list->head;
-			while(i < list_size(proc->write_sample_list)){
-				iter = iter->next;
-				i++;
+			if(is_socket_write_sample(proc, fd)){
+				pthread_spin_lock(&proc->swsl_lock);
+				// records only latest 8 samples
+				if(8 == list_size(proc->socket_write_sample_list))
+					proc->socket_write_sample_list->size = 0;
+
+				iter = proc->socket_write_sample_list->head;
+				while(i < list_size(proc->socket_write_sample_list)){
+					iter = iter->next;
+					i++;
+				}
+				ws = iter->data;
+				ws->fd = fd;
+				ws->buf = buf;
+				ws->len = len;
+				proc->socket_write_sample_list->size++;
+				pthread_spin_unlock(&proc->swsl_lock);
+			} else {
+				pthread_spin_lock(&proc->wsl_lock);
+				// records only latest 8 samples
+				if(8 == list_size(proc->write_sample_list))
+					proc->write_sample_list->size = 0;
+
+				iter = proc->write_sample_list->head;
+				while(i < list_size(proc->write_sample_list)){
+					iter = iter->next;
+					i++;
+				}
+				ws = iter->data;
+				ws->fd = fd;
+				ws->buf = buf;
+				ws->len = len;
+				proc->write_sample_list->size++;
+				pthread_spin_unlock(&proc->wsl_lock);
 			}
-			ws = iter->data;
-			ws->fd = fd;
-			ws->buf = buf;
-			ws->len = len;
-			proc->write_sample_list->size++;
-			pthread_spin_unlock(&proc->wsl_lock);
+
 
 			/*
 			ptr = ((char *) trp_sample.data) + 16;
@@ -1624,6 +1754,7 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 			devbuflist_init(&proc->devbuflist);
 			perffdlist_init(&proc->perf_fdlist);
 			wsl_init(&proc->write_sample_list);
+			swsl_init(&proc->socket_write_sample_list);
 			cache_init(&proc->cache);
 
 			Perf_fd *perf_fd1, *perf_fd2;
@@ -1674,6 +1805,8 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 			bool video;
 			bool save;
 			bool stream;
+			bool ret1;
+			bool ret2;
 			while(true){
 				//printf("usleep %lu\n", get_usleep_time(proc));
 				usleep(get_usleep_time(proc));
@@ -1699,16 +1832,21 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 					stream = get_action_bit(action_mask, 2);
 
 					if(load_evt_high(proc)){
-						printf("high load event\n");
-						if(invalid_write(proc, save)){
+						ret1 = invalid_write(proc, save);
+						ret2 = invalid_streaming(proc, stream);
+
+						if(ret1 && ret2){
 							send_signal(proc, SIGSTOP, 
-								   "The process claimed that it will not save video, but it did!\n");
+									"The process was writing to non-promise file " 
+									"and streaming via invalid connection\n");
 							goto clean;
-						} 
-						
-						if(invalid_streaming(proc, stream)){
+						} else if(ret1){
 							send_signal(proc, SIGSTOP, 
-								   "The process claimed that it will not video invalid_streaming, but it did!\n");
+								   "The process was writing to non-promise file\n");
+							goto clean;
+						} else if(ret2){
+							send_signal(proc, SIGSTOP, 
+								   "The process was streaming via invalid connection\n");
 							goto clean;
 						}
 					}

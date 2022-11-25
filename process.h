@@ -25,7 +25,8 @@ typedef struct process {
 	// perf related
 	List *perf_fdlist;
 	List *write_sample_list;
-	pthread_spinlock_t wsl_lock;    // wsl = "write sample list"
+	List *socket_write_sample_list;
+	pthread_spinlock_t wsl_lock, swsl_lock;    // wsl = "write sample list", swsl = "socket write sample list"
 	int last_run_cpu;
 
 	int tty_nr;
