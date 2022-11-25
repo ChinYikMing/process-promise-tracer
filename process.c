@@ -4,6 +4,7 @@
 #include "list.h"
 #include "process.h"
 #include <poll.h>
+#include "net.h"
 #include <libgen.h>
 #include "signal.h"
 #include "perf_sampling.h"
@@ -52,16 +53,77 @@ typedef struct thread_data {
 	Perf_fd *perf_fd; // to get sample_id and rb
 } pthread_data_t;
 
+static int fdlist_init(List **fdlist){
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	*fdlist = tmp;
+	return 0;
+}
+
+static int perffdlist_init(List **perffdlist){
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	*perffdlist = tmp;
+	return 0;
+}
+
+static int device_list_init(List** device_list)
+{
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	*device_list = tmp;
+	return 0;
+}
+
+static int access_file_list_init(List** access_file_list)
+{
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	*access_file_list = tmp;
+	return 0;
+}
+
+static int connection_list_init(List** connection_list)
+{
+	List *tmp= malloc(sizeof(List));
+	if(!tmp)
+		return 1;
+
+	LIST_INIT(tmp);
+
+	*connection_list = tmp;
+	return 0;
+}
+
 static bool get_action_bit(const char *action, int index){
 	size_t len = strlen(action);
 
 	if(index < 0 || index > len)
-		return false;
+		goto end;
 
 	for(size_t i = len; i > 0; i--){
 		if((len - index - 1) == i)
 			return (action[i] == '1');
 	}
+
+end:
+	return false;
 }
 
 static bool using_camera(Process *proc){
@@ -79,196 +141,6 @@ static bool using_camera(Process *proc){
 
 static bool load_evt_high(Process *proc){
 	return (proc->hit_cnt > 0);
-}
-
-static int parse_net_lines(FILE *netfile, const char *sock_inode, char *rem_addr){
-	char buf[BUF_SIZE];
-	char *rem_addr_ptr;
-	char *rem_addr_qtr;
-	size_t len;
-	
-	while(fgets(buf, BUF_SIZE, netfile)){
-		rem_addr_ptr = buf;
-
-		if(strstr(buf, sock_inode)){
-			rem_addr_ptr = strchr(rem_addr_ptr + 1, ':');
-			for(int i = 0; i < 2; i++)
-				rem_addr_ptr = strchr(rem_addr_ptr + 1, ' ');
-			rem_addr_qtr = strchr(rem_addr_ptr + 1, ' ');
-			len = rem_addr_qtr - rem_addr_ptr;
-			strncpy(rem_addr, rem_addr_ptr + 1, len);
-			rem_addr[len] = 0;
-			return 0;
-		}
-	}
-
-	return 1;
-} 
-
-static int get_sock_inode_by_sockfd(Process *proc, int sockfd, char *sock_inode){
-	char buf[BUF_SIZE] = {0};
-	char path[BUF_SIZE] = {0};
-	char pidstr[32] = {0};
-	char sockfdstr[32] = {0};
-	int ret;
-	char *ptr, *qtr;
-
-	sprintf(pidstr, "%d", proc->pid);
-	sprintf(sockfdstr, "%d", sockfd);
-
-	strcpy(path, PROC_DIR);
-	strcat(path, "/");
-	strcat(path, pidstr);
-	strcat(path, "/");
-	strcat(path, "fd");
-	strcat(path, "/");
-	strcat(path, sockfdstr);
-
-	ret = readlink(path, buf, BUF_SIZE);
-	if(-1 == ret)
-		return 1;
-	buf[ret] = 0;
-
-	ptr = buf;
-	ptr = strchr(buf, '[') + 1;
-	qtr = strchr(ptr, ']');
-	strncpy(sock_inode, ptr, qtr - ptr);
-	sock_inode[qtr - ptr] = 0;
-	//printf("sock_inode: %s, %d, %c, %c\n", sock_inode, qtr - ptr, *ptr, *qtr);
-	return 0;
-}
-
-static void get_ip_port_from_rem_addr(char *rem_addr, int ipv4, char *ip, char *port){
-	char tmp[64] = {0};
-	uint16_t port_val;
-	char *ptr, *qtr;
-
-	ptr = rem_addr;
-	if(ipv4){
-		uint8_t *rtr;
-		uint32_t ip_val;
-
-		qtr = strchr(ptr, ':');
-		strcpy(tmp, "0x");
-		strncat(tmp, ptr, qtr - ptr);
-		tmp[qtr - ptr + 2] = 0;
-		ip_val = (uint32_t) strtoul(tmp, NULL, 16);
-		ip_val = ntohl(ip_val);
-
-		rtr = ((uint8_t *) &ip_val) + 3;
-                for(int i = 4; i > 0; i--){
-                        memset(tmp, 0, 64);
-                        sprintf(tmp, "%u", *rtr);
-
-                        if(i == 1){
-                                strcat(ip, tmp);
-                                break;
-                        }
-
-                        strcat(ip, tmp);
-                        strcat(ip, ".");
-                        rtr--;
-                }
-	} else { // ipv6
-		qtr = strchr(ptr, ':');
-                strncat(tmp, ptr, qtr - ptr);
-                tmp[qtr - ptr] = 0;
-
-                ptr = ptr + 31;
-                for(int i = 0; i < 8; i++){
-                        for(int j = 0; j < 4; j++){
-                                sprintf(tmp, "%c", *ptr);
-                                strcat(ip, tmp);
-                                ptr--;
-                        }
-
-                        if(i == 7)
-                                break;
-
-                        strcat(ip, ":");
-                }
-	}
-
-	ptr = strchr(rem_addr, ':') + 1;
-	memset(tmp, 0, 64);
-	strcpy(tmp, "0x");
-	strcat(tmp, ptr);
-	port_val = (uint16_t) strtoul(tmp, NULL, 16);
-	sprintf(port, "%u", port_val);
-}
-
-static int get_rem_addr_by_sockfd(Process *proc, int sockfd, char *rem_addr, int *tcp, int *ipv4){
-	int ret;
-	char sock_inode[16];
-	ret = get_sock_inode_by_sockfd(proc, sockfd, sock_inode);
-	if(ret)
-		return 1;
-
-	// try tcp first
-	char tcp_file[32] = {0};
-	strcpy(tcp_file, PROC_DIR);
-	strcat(tcp_file, "/net/tcp");
-	FILE *net_file_ptr = fopen(tcp_file, "r");
-	if(!net_file_ptr)
-		return 1;
-
-	ret = parse_net_lines(net_file_ptr, sock_inode, rem_addr);
-	fclose(net_file_ptr);
-	if(!ret) {
-		*tcp = 1;
-		*ipv4 = 1;
-		return 0;
-	}
-	
-	// try tcp6 first
-	memset(tcp_file, 0, 32);
-	strcpy(tcp_file, PROC_DIR);
-	strcat(tcp_file, "/net/tcp6");
-	net_file_ptr = fopen(tcp_file, "r");
-	if(!net_file_ptr)
-		return 1;
-
-	ret = parse_net_lines(net_file_ptr, sock_inode, rem_addr);
-	fclose(net_file_ptr);
-	if(!ret){
-		*tcp = 1;
-		*ipv4 = 0;
-		return 0;
-	}
-
-	// try udp
-	char udp_file[32] = {0};
-	strcpy(udp_file, PROC_DIR);
-	strcat(udp_file, "/net/udp");
-	net_file_ptr = fopen(udp_file, "r");
-	if(!net_file_ptr)
-		return 1;
-
-	ret = parse_net_lines(net_file_ptr, sock_inode, rem_addr);
-	fclose(net_file_ptr);
-	if(!ret){
-		*tcp = 0;
-		*ipv4 = 1;
-		return 0;
-	}
-	
-	// try udp6
-	memset(udp_file, 0, 32);
-	strcpy(udp_file, PROC_DIR);
-	strcat(udp_file, "/net/udp6");
-	net_file_ptr = fopen(udp_file, "r");
-	if(!net_file_ptr)
-		return 1;
-
-	ret = parse_net_lines(net_file_ptr, sock_inode, rem_addr);
-	fclose(net_file_ptr);
-	if(!ret){
-		*tcp = 0;
-		*ipv4 = 0;
-		return 0;
-	}
-	
-	return 1;
 }
 
 static bool invalid_write(Process *proc, bool save){
@@ -439,7 +311,7 @@ bool if_parse_error(struct json_object* obj, Process *proc)
 	return true;
 }
 
-struct data *data_new(char* val1, char* val2){
+struct data *data_new(const char* val1, const char* val2){
 	struct data *d = malloc(sizeof(struct data));
 	if(!d)
 		return NULL;
@@ -525,8 +397,8 @@ bool process_promise_pass(Process *proc){
 		struct json_object* mask = json_object_object_get(jvalue, "action_mask");
 		if(!if_parse_error(device_i, proc) || !if_parse_error(mask, proc))
 			return false;
-		char* device_ = json_object_get_string(device_i);
-		char* mask_ = json_object_get_string(mask);
+		const char* device_ = json_object_get_string(device_i);
+		const char* mask_ = json_object_get_string(mask);
 		d = data_new(device_, mask_);
 		node = node_create(d);
 		list_push_back(proc->device_list, node);
@@ -543,8 +415,8 @@ bool process_promise_pass(Process *proc){
 		struct json_object* type = json_object_object_get(jvalue, "type");
 		if(!if_parse_error(file_name, proc) || !if_parse_error(type, proc))
 			return false;
-		char* file_name_ = json_object_get_string(file_name);
-		char* type_ = json_object_get_string(type);
+		const char* file_name_ = json_object_get_string(file_name);
+		const char* type_ = json_object_get_string(type);
 		d = data_new(file_name_, type_);
 		node = node_create(d);
 		list_push_back(proc->access_file_list, node);
@@ -561,8 +433,8 @@ bool process_promise_pass(Process *proc){
 		struct json_object* mask = json_object_object_get(jvalue, "action_mask");
 		if(!if_parse_error(ipport, proc) || !if_parse_error(mask, proc))
 			return false;
-		char* ipport_ = json_object_get_string(ipport);
-		char* mask_ = json_object_get_string(mask);
+		const char* ipport_ = json_object_get_string(ipport);
+		const char* mask_ = json_object_get_string(mask);
 		d = data_new(ipport_, mask_);
 		node = node_create(d);
 		list_push_back(proc->connection_list, node);
@@ -571,43 +443,6 @@ bool process_promise_pass(Process *proc){
 	munmap(json, fs);
 	return true;
 }
-int device_list_init(List** device_list)
-{
-	List *tmp= malloc(sizeof(List));
-	if(!tmp)
-		return 1;
-
-	LIST_INIT(tmp);
-
-	*device_list = tmp;
-	return 0;
-}
-
-int access_file_list_init(List** access_file_list)
-{
-	List *tmp= malloc(sizeof(List));
-	if(!tmp)
-		return 1;
-
-	LIST_INIT(tmp);
-
-	*access_file_list = tmp;
-	return 0;
-}
-
-int connection_list_init(List** connection_list)
-{
-	List *tmp= malloc(sizeof(List));
-	if(!tmp)
-		return 1;
-
-	LIST_INIT(tmp);
-
-	*connection_list = tmp;
-	return 0;
-}
-
-
 
 Fd *fd_create(int fd, const char *path){
 	Fd *_fd = malloc(sizeof(Fd));
@@ -619,28 +454,6 @@ Fd *fd_create(int fd, const char *path){
 	strcpy(_fd->path, path);
 
 	return _fd;
-}
-
-int fdlist_init(List **fdlist){
-	List *tmp= malloc(sizeof(List));
-	if(!tmp)
-		return 1;
-
-	LIST_INIT(tmp);
-
-	*fdlist = tmp;
-	return 0;
-}
-
-int perffdlist_init(List **perffdlist){
-	List *tmp= malloc(sizeof(List));
-	if(!tmp)
-		return 1;
-
-	LIST_INIT(tmp);
-
-	*perffdlist = tmp;
-	return 0;
 }
 
 WriteSample *write_sample_create(unsigned long fd, unsigned long buf, unsigned long len){
@@ -1633,6 +1446,8 @@ void *trp_monitoring(void *arg){
 			pthread_exit(NULL);
 		}
 	}
+
+	return NULL;
 }
 
 // skip pid of repeat if 'repeat' in /proc/[pid]/task directory since it is same as [pid]
@@ -1802,7 +1617,6 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 			Node *iter;
 			struct data *d;
 			const char *action_mask;
-			bool video;
 			bool save;
 			bool stream;
 			bool ret1;
@@ -1827,7 +1641,6 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 					}
 
 					action_mask = d->val2;
-					video = get_action_bit(action_mask, 0);
 					save = get_action_bit(action_mask, 1);
 					stream = get_action_bit(action_mask, 2);
 
