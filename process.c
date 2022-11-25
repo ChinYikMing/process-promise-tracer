@@ -1589,8 +1589,10 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 		continue;
 	}
 
-	if(process_is_stop(proc))
+	if(process_is_stop(proc)){
+		process_clean(proc);
 		continue;
+	}
 
 	//scan_proc_dir(process_list, pid_path, proc);
 	
@@ -1678,6 +1680,9 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 				printf("hit: %d\n", proc->hit_cnt);
 
 				process_stat(proc);
+				if(process_is_stop(proc) || process_is_dead(proc))
+					goto clean;
+
 				process_updateFdList(proc);
 				process_updateDevBufList(proc);
 
@@ -1698,25 +1703,24 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 						if(invalid_write(proc, save)){
 							send_signal(proc, SIGSTOP, 
 								   "The process claimed that it will not save video, but it did!\n");
+							goto clean;
 						} 
 						
 						if(invalid_streaming(proc, stream)){
 							send_signal(proc, SIGSTOP, 
 								   "The process claimed that it will not video invalid_streaming, but it did!\n");
+							goto clean;
 						}
 					}
 
 				}
-			
-				if(process_is_dead(proc)){
-					perf_event_stop(proc);
-					perf_event_unregister(proc);
-					printSummary(proc->hit_cnt, proc->miss_cnt, proc->eviction_cnt);
-					process_clean(proc);
-					printf("tracee exit\n");
-					exit(EXIT_SUCCESS);
-				}
 			}
+
+			clean:
+				perf_event_stop(proc);
+				perf_event_unregister(proc);
+				process_clean(proc);
+				exit(EXIT_SUCCESS);
 		} else {
 			if(!free_node_found){
 				//printf("not found free node\n");
