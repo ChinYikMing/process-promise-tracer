@@ -972,7 +972,7 @@ void process_updateFdList(Process *proc){
                 continue;
 
 	    memset(fd_path, 0, PATH_MAX);
-	    memset(fd_file, 0, PATH_MAX);
+	    memset(fd_file, 0, 32);
 	    strcpy(fd_file, fd_dir_path);
 	    strcat(fd_file, "/");
 	    strcat(fd_file, name);
@@ -1497,11 +1497,9 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 	//scan_proc_dir(process_list, pid_path, proc);
 	
 	if(!pre_exist){
-#ifdef DAEMON
 		log_open();
 		syslog(LOG_NOTICE, LOG_PREFIX"new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
 		log_close();
-#endif
 
 		printf("new process, pid: %s, exe: %s, state: %c\n", name, proc->exe, proc->state);
 
@@ -1569,7 +1567,7 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 			// check all load event and sys_enter_write periodically to detect data leakage and update some process state
 			List *device_list = proc->device_list;
 			Node *iter;
-			struct data *d;
+			struct data *d = NULL;
 			const char *action_mask;
 			bool save;
 			bool stream;
@@ -1592,6 +1590,17 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 						d = LIST_ENTRY(iter, struct data);
 						if(0 == strcmp(d->val1, "camera"))
 							break;
+						d = NULL;
+					}
+
+					if(!d){
+						log_open();
+						syslog(LOG_NOTICE, LOG_PREFIX"process(PID=%d, exe=%s) used camera " 
+									      "but did not mentioned in promise\n", proc->pid, proc->exe);
+						log_close();
+						send_signal(proc, SIGSTOP, 
+							   "The process accessed the camera\n");
+						goto clean;
 					}
 
 					action_mask = d->val2;

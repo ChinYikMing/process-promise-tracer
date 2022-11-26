@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -g -Wall `pkg-config --cflags json-c` -DDAEMON
+CFLAGS = -O3 -g -Wall `pkg-config --cflags json-c`
 CLIBS = `pkg-config --libs json-c` -pthread -lunwind-ptrace -lunwind-generic
 
 all: process-promise-tracerd.c list.c process.c signal.c perf_sampling.c config.c log.c cpu.c net.c callstack.c
