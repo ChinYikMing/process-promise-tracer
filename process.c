@@ -14,7 +14,6 @@
 #include "perf_trp.h"
 #include "perf_event.h"
 #include "config.h"
-#include "cache_va.h"
 #include "log.h"
 #include <libelf.h>
 #include <sys/mman.h>
@@ -141,7 +140,7 @@ static bool using_camera(Process *proc){
 }
 
 static bool load_evt_high(Process *proc){
-	return (proc->hit_cnt > 0);
+	return (proc->hit > 0);
 }
 
 static bool invalid_write(Process *proc, bool save){
@@ -665,33 +664,6 @@ void swsl_destroy(List *socket_write_sample_list){
 	free(socket_write_sample_list);
 }
 
-int cache_init(cacheline ***cache){
-	if(0 == assoc && 0 == block_bit && 0 == set_bit && 0 == set_size){
-		Node *iter;
-		Conf *c;
-		LIST_FOR_EACH(cf->list, iter){
-			c = LIST_ENTRY(iter, Conf);
-			if(0 == strcmp(c->key, "assoc")){
-				sscanf(c->val, "%d", &assoc);
-			} else if(0 == strcmp(c->key, "block_bit")){
-				sscanf(c->val, "%d", &block_bit);
-			} else if(0 == strcmp(c->key, "set_bit")){
-				sscanf(c->val, "%d", &set_bit);
-			}
-		}
-		set_size = 1 << set_bit;
-	}
-
-	//printf("%d %d %d %d\n", assoc, block_bit, set_bit, set_size);
-
-	void *tmp = cache_create(set_size, assoc);
-	if(!tmp)
-		return 1;
-
-	*cache = tmp;
-	return 0;
-}
-
 Node *list_get_node_by_pid(List *list, pid_t pid, bool *pre_exist){
 	Node *node = NULL;
 	Process *proc = NULL;
@@ -844,9 +816,7 @@ Process *process_create(int pid){
 	proc->tracer = 0;
 	proc->last_run_cpu = -1;
 	proc->tty_nr = -1;
-	proc->hit_cnt = 0;
-	proc->miss_cnt = 0;
-	proc->eviction_cnt = 0;
+	proc->hit = 0;
 
 	proc->perf_fdlist = NULL;
 	proc->devbuflist = NULL;
@@ -856,7 +826,6 @@ Process *process_create(int pid){
 	proc->perf_fdlist = NULL;
 	proc->write_sample_list = NULL;
 	proc->socket_write_sample_list = NULL;
-	proc->cache = NULL;
 
 	pthread_spin_init(&proc->wsl_lock, PTHREAD_PROCESS_SHARED);
 	pthread_spin_init(&proc->swsl_lock, PTHREAD_PROCESS_SHARED);
@@ -880,7 +849,6 @@ void process_clean(Process *proc){
 	perffdlist_destroy(proc->perf_fdlist);
 	wsl_destroy(proc->write_sample_list);
 	swsl_destroy(proc->socket_write_sample_list);
-	cache_destroy(proc->cache, set_size);
 
 	proc->fdlist = NULL;
 	proc->devbuflist = NULL;
@@ -890,7 +858,6 @@ void process_clean(Process *proc){
 	proc->perf_fdlist = NULL;
 	proc->write_sample_list = NULL;
 	proc->socket_write_sample_list = NULL;
-	proc->cache = NULL;
 
 	memset(proc->exe, 0, PATH_MAX);
 	memset(proc->tty_path, 0, 32);
@@ -900,9 +867,7 @@ void process_clean(Process *proc){
 	proc->state = 'X';
 	proc->flags = 0;
 	proc->tracer = 0;
-	proc->hit_cnt = 0;
-	proc->miss_cnt = 0;
-	proc->eviction_cnt = 0;
+	proc->hit = 0;
 }
 
 void process_updateExe(Process *proc){
@@ -1251,16 +1216,13 @@ void *load_evt_monitoring(void *arg){
 	int ret;
 	sample_raw_t sample;
 	va_sample_t va_sample;
-	char expr[32];
 	uint64_t addr_start, addr_end;
 
 	while(true){
 		//printf("usleep %lu\n", get_usleep_time(proc));
 		usleep(get_usleep_time(proc));
 		/*
-		proc->hit_cnt = 0;
-		proc->miss_cnt = 0;
-		proc->eviction_cnt = 0;
+		proc->hit = 0;
 		*/
 
 		ret = perf_event_raw_read(proc, perf_fd, &sample);
@@ -1282,10 +1244,7 @@ void *load_evt_monitoring(void *arg){
 			addr_end = addr_start + devbuf->len;
 
 			if(va_sample.buf_addr >= addr_start && va_sample.buf_addr <= addr_end) {
-				 memset(expr, 0, 32);
-				 sprintf(expr, "L %lx", va_sample.buf_addr);
-				 cache_virtaddr(proc, set_bit, assoc, block_bit, expr);
-				 //printf("addr: 0x%lx\n", va_sample.buf_addr);
+				 proc->hit++;
 			}
 		}
 	}
@@ -1571,7 +1530,6 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 			perffdlist_init(&proc->perf_fdlist);
 			wsl_init(&proc->write_sample_list);
 			swsl_init(&proc->socket_write_sample_list);
-			cache_init(&proc->cache);
 
 			Perf_fd *perf_fd1, *perf_fd2;
 
@@ -1625,7 +1583,7 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 			while(true){
 				//printf("usleep %lu\n", get_usleep_time(proc));
 				usleep(get_usleep_time(proc));
-				printf("hit: %d\n", proc->hit_cnt);
+				printf("hit: %d\n", proc->hit);
 
 				process_stat(proc);
 				if(process_is_stop(proc) || process_is_dead(proc))
