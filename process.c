@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include "list.h"
+#include "callstack.h"
 #include "process.h"
 #include <poll.h>
 #include "net.h"
@@ -1649,15 +1650,18 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 						ret2 = invalid_streaming(proc, stream);
 
 						if(ret1 && ret2){
+							callstack_unwind_log(proc);
 							send_signal(proc, SIGSTOP, 
 									"The process was writing to non-promise file " 
 									"and streaming via invalid connection\n");
 							goto clean;
 						} else if(ret1){
+							callstack_unwind_log(proc);
 							send_signal(proc, SIGSTOP, 
 								   "The process was writing to non-promise file\n");
 							goto clean;
 						} else if(ret2){
+							callstack_unwind_log(proc);
 							send_signal(proc, SIGSTOP, 
 								   "The process was streaming via invalid connection\n");
 							goto clean;
