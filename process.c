@@ -22,11 +22,6 @@
 #include <sys/syscall.h>
 #include <json-c/json.h>
 
-int assoc = 0;
-int block_bit = 0;
-int set_bit = 0;
-int set_size = 0;
-
 typedef struct fd {
         int nr;
         char path[PATH_MAX];
