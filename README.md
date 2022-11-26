@@ -19,6 +19,7 @@ insecure issues about the behind scene actions for example record down the video
 * make
 * libelf-dev
 * json-c
+* libunwind
 
 ### Installing
 
