@@ -18,12 +18,12 @@ insecure issues about the behind scene actions for example record down the video
 * gcc
 * make
 * libelf-dev
-* json-c
-* libunwind
+* [json-c](https://github.com/json-c/json-c)
+* [libunwind](https://github.com/libunwind/libunwind)
 
 ### Installing
 
-* clone the repository
+* clone the repository or via release(assets need to be decompressed)
 * make
 * make install
 
@@ -60,6 +60,11 @@ $systemctl reload process-promise-tracerd
 $systemctl status process-promise-tracerd
 ```
 
+* enable the daemon automatically startup after booting
+```
+$systemctl enable process-promise-tracerd
+```
+
 ### Program Configuration file
 * located in /etc/process_promise_tracer.conf
 * There are two sections in the config file: [Daemon] and [Untrusted Program]
@@ -67,9 +72,6 @@ $systemctl status process-promise-tracerd
 * Sample configuration file, only /usr/bin/test program will be traced by the daemon program
 ```
 [Daemon]
-assoc=8
-block_bit=20
-set_bit=6
 perf_sample_period=3000
 scan_procfs_period=1000
 
@@ -79,11 +81,8 @@ scan_procfs_period=1000
 
 ## Version History
 
-* 0.2
-    * Various bug fixes and optimizations
-    * See [commit change]() or See [release history]()
-* 0.1
-    * Initial Release
+* 1.0
+    * [Initial Release](https://github.com/ChinYikMing/process-promise-tracer/releases/tag/v1.0)
 
 ## License
 
