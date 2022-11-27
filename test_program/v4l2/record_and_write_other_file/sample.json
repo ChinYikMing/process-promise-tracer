@@ -1,0 +1,25 @@
+{
+	"device":
+	[
+		{
+			"device": "camera",
+			"action_mask": "1000"
+		},
+		{
+			"device": "screen",
+			"action_mask": "0000"
+		}
+	],
+	"files":
+	[
+
+	],
+	"connections":
+	[
+			{
+					"ipport": "127.0.0.1:6443",
+					"action_mask": "000"
+			}
+	]
+
+}
