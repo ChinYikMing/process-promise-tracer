@@ -1,0 +1,17 @@
+{
+	"device":
+	[
+		{
+			"device": "camera",
+			"action_mask": "001"
+		}
+	],
+	"files":
+	[
+
+	],
+	"connections":
+	[
+	
+	]
+}

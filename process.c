@@ -171,6 +171,9 @@ static bool invalid_write(Process *proc, bool save){
 	if(!save && 0 == list_size(wsl))               // no write sample => commitment
 		return false;
 
+	if(save && 0 == list_size(wsl))                // no write sample => commitment
+		return false;
+
 	pthread_spin_lock(&proc->wsl_lock);
 	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
 		ws = iter->data;
@@ -179,8 +182,18 @@ static bool invalid_write(Process *proc, bool save){
 		strcpy(path, basepath);
 		strcat(path, fdstr);
 		ret = readlink(path, buf, BUF_SIZE);
-		if(-1 == ret)
+		if(-1 == ret){ // fd could be closed
+			// check first init fdlist
+			Node *iter;
+			Fd *fd;
+			LIST_FOR_EACH(proc->fdlist, iter){
+				fd = LIST_ENTRY(iter, Fd);
+				if(fd->nr == ws->fd)
+					return false;
+			}
+
 			continue;
+		}
 		buf[ret] = 0;
 
 		LIST_FOR_EACH(access_file_list, fileiter){
@@ -246,6 +259,9 @@ static bool invalid_streaming(Process *proc, bool stream){
 	}
 
 	if(!stream && 0 == list_size(swsl))               // no socket write sample => commitment
+		return false;
+
+	if(stream && 0 == list_size(swsl))                // no socket write sample => commitment
 		return false;
 
 	pthread_spin_lock(&proc->swsl_lock);
@@ -515,6 +531,8 @@ WriteSample *write_sample_create(unsigned long fd, unsigned long buf, unsigned l
 	return ws;
 }
 
+#define WRITE_SAMPLE_DUMMY_SIZE 16
+
 int wsl_init(List **write_sample_list){
 	List *tmp= malloc(sizeof(List));
 	if(!tmp)
@@ -522,10 +540,10 @@ int wsl_init(List **write_sample_list){
 
 	LIST_INIT(tmp);
 
-	// create 8 dummy node
+	// create dummy node
 	Node *dummy_node;
 	WriteSample *dummy_sample;
-	for(int i = 0; i < 8; i++){
+	for(int i = 0; i < WRITE_SAMPLE_DUMMY_SIZE; i++){
 		dummy_sample = write_sample_create(0, 0, 0);
 		dummy_node = node_create(dummy_sample);
 		list_push_back(tmp, dummy_node);
@@ -543,10 +561,10 @@ int swsl_init(List **socket_write_sample_list){
 
 	LIST_INIT(tmp);
 
-	// create 8 dummy node
+	// create dummy node
 	Node *dummy_node;
 	WriteSample *dummy_sample;
-	for(int i = 0; i < 8; i++){
+	for(int i = 0; i < WRITE_SAMPLE_DUMMY_SIZE; i++){
 		dummy_sample = write_sample_create(0, 0, 0);
 		dummy_node = node_create(dummy_sample);
 		list_push_back(tmp, dummy_node);
@@ -683,7 +701,7 @@ void wsl_destroy(List *write_sample_list){
 
 	Node *iter = write_sample_list->head, *prev;
 	WriteSample *write_sample;
-	for(int i = 0; i < 8; i++){
+	for(int i = 0; i < WRITE_SAMPLE_DUMMY_SIZE; i++){
 		write_sample = (WriteSample *) iter->data;
 		free(write_sample);
 		prev = iter;
@@ -700,7 +718,7 @@ void swsl_destroy(List *socket_write_sample_list){
 
 	Node *iter = socket_write_sample_list->head, *prev;
 	WriteSample *write_sample;
-	for(int i = 0; i < 8; i++){
+	for(int i = 0; i < WRITE_SAMPLE_DUMMY_SIZE; i++){
 		write_sample = (WriteSample *) iter->data;
 		free(write_sample);
 		prev = iter;
@@ -1349,6 +1367,32 @@ static bool is_socket_write_sample(Process *proc, unsigned long fd){
 	return (0 == strncmp(buf, "socket:[", 8));
 }
 
+static bool is_anon_write_sample(Process *proc, unsigned long fd){
+	char buf[BUF_SIZE] = {0};
+	char path[BUF_SIZE] = {0};
+	char pidstr[32] = {0};
+	char fdstr[32] = {0};
+	int ret;
+
+	sprintf(pidstr, "%d", proc->pid);
+	sprintf(fdstr, "%lu", fd);
+
+	strcpy(path, PROC_DIR);
+	strcat(path, "/");
+	strcat(path, pidstr);
+	strcat(path, "/");
+	strcat(path, "fd");
+	strcat(path, "/");
+	strcat(path, fdstr);
+
+	ret = readlink(path, buf, BUF_SIZE);
+	if(-1 == ret)
+		return false;
+	buf[ret] = 0;
+
+	return (0 == strncmp(buf, "anon_inode:[", 12));
+}
+
 void *trp_monitoring(void *arg){
 	pthread_data_t *thread_data = (pthread_data_t *) arg;
 	Process *proc = (Process *) thread_data->proc;
@@ -1394,6 +1438,9 @@ void *trp_monitoring(void *arg){
 			len = *((unsigned long *) ptr);
 
 			if(is_tty_write_sample(proc, fd))
+				continue;
+
+			if(is_anon_write_sample(proc, fd)) // no idea for now 
 				continue;
 
 			if(is_socket_write_sample(proc, fd)){
@@ -1634,7 +1681,7 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 				if(process_is_stop(proc) || process_is_dead(proc))
 					goto clean;
 
-				process_updateFdList(proc);
+				//process_updateFdList(proc);
 				process_updateDevBufList(proc);
 
 				if(using_camera(proc)){

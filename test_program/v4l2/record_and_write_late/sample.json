@@ -1,0 +1,20 @@
+{
+	"device":
+	[
+		{
+			"device": "camera",
+			"action_mask": "0011"
+		}
+	],
+	"files":
+	[
+		{
+			"file_name": "VideoTest.avi",
+			"type": "video"
+		}
+	],
+	"connections":
+	[
+	
+	]
+}
