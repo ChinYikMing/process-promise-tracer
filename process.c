@@ -1445,8 +1445,8 @@ void *trp_monitoring(void *arg){
 
 			if(is_socket_write_sample(proc, fd)){
 				pthread_spin_lock(&proc->swsl_lock);
-				// records only latest 8 samples
-				if(8 == list_size(proc->socket_write_sample_list))
+				// records only latest WRITE_SAMPLE_DUMMY_SIZE samples
+				if(WRITE_SAMPLE_DUMMY_SIZE == list_size(proc->socket_write_sample_list))
 					proc->socket_write_sample_list->size = 0;
 
 				iter = proc->socket_write_sample_list->head;
@@ -1462,8 +1462,8 @@ void *trp_monitoring(void *arg){
 				pthread_spin_unlock(&proc->swsl_lock);
 			} else {
 				pthread_spin_lock(&proc->wsl_lock);
-				// records only latest 8 samples
-				if(8 == list_size(proc->write_sample_list))
+				// records only latest WRITE_SAMPLE_DUMMY_SIZE samples
+				if(WRITE_SAMPLE_DUMMY_SIZE == list_size(proc->write_sample_list))
 					proc->write_sample_list->size = 0;
 
 				iter = proc->write_sample_list->head;
