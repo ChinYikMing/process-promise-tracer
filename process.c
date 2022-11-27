@@ -141,14 +141,6 @@ static bool load_evt_high(Process *proc){
 static bool invalid_write(Process *proc, bool save){
 	List *access_file_list = proc->access_file_list;
 	List *wsl = proc->write_sample_list;
-
-	if((save && 0 == list_size(access_file_list)) || // not specified to write file in promise but tend to write file
-	   (!save && list_size(wsl) > 0))               // should not have any write sample if not tend to write file
-		return true;
-
-	if(!save && 0 == list_size(wsl))               // no write sample => commitment
-		return false;
-
 	Node *iter, *fileiter;
 	struct data *filedata;
 	size_t i;
@@ -168,6 +160,16 @@ static bool invalid_write(Process *proc, bool save){
 	strcat(basepath, "/");
 	strcat(basepath, "fd");
 	strcat(basepath, "/");
+
+	if((save && 0 == list_size(access_file_list)) || // not specified to write file in promise but tend to write file
+	   (!save && list_size(wsl) > 0))               // should not have any write sample if not tend to write file
+	{
+		pthread_spin_lock(&proc->wsl_lock);
+		goto log_write_sample;
+	}
+
+	if(!save && 0 == list_size(wsl))               // no write sample => commitment
+		return false;
 
 	pthread_spin_lock(&proc->wsl_lock);
 	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
@@ -191,6 +193,23 @@ static bool invalid_write(Process *proc, bool save){
 
 		//printf("fd: %lu, buf: %lu, len: %lu\n", ws->fd, ws->buf, ws->len);
 	}
+
+log_write_sample:
+	log_open();
+	for(i = 0, iter = wsl->head; i < list_size(wsl); i++, iter = iter->next){
+		ws = iter->data;
+
+		sprintf(fdstr, "%lu", ws->fd);
+		strcpy(path, basepath);
+		strcat(path, fdstr);
+		ret = readlink(path, buf, BUF_SIZE);
+		if(-1 == ret)
+			continue;
+		buf[ret] = 0;
+
+		syslog(LOG_ERR, LOG_PREFIX"process(PID=%d)'s invalid write file: %s\n", proc->pid, buf);
+	}
+	log_close();
 	pthread_spin_unlock(&proc->wsl_lock);
 
 	return true;
@@ -199,14 +218,6 @@ static bool invalid_write(Process *proc, bool save){
 static bool invalid_streaming(Process *proc, bool stream){
 	List *connection_list = proc->connection_list;
 	List *swsl = proc->socket_write_sample_list;
-
-	if((stream && 0 == list_size(connection_list)) || // not specified connections in promise but tend to write data via connections
-	   (!stream && list_size(swsl) > 0))               // should not have any write sample if not tend to stream
-		return true;
-
-	if(!stream && 0 == list_size(swsl))               // no socket write sample => commitment
-		return false;
-
 	Node *iter, *conn_iter;
 	struct data *conn;
 	size_t i;
@@ -226,6 +237,16 @@ static bool invalid_streaming(Process *proc, bool stream){
 	strcat(basepath, "/");
 	strcat(basepath, "fd");
 	strcat(basepath, "/");
+
+	if((stream && 0 == list_size(connection_list)) || // not specified connections in promise but tend to write data via connections
+	   (!stream && list_size(swsl) > 0))               // should not have any write sample if not tend to stream
+	{
+		pthread_spin_lock(&proc->swsl_lock);
+		goto log_stream_sample;
+	}
+
+	if(!stream && 0 == list_size(swsl))               // no socket write sample => commitment
+		return false;
 
 	pthread_spin_lock(&proc->swsl_lock);
 	for(i = 0, iter = swsl->head; i < list_size(swsl); i++, iter = iter->next){
@@ -263,6 +284,37 @@ static bool invalid_streaming(Process *proc, bool stream){
 
 		//printf("fd: %lu, buf: %lu, len: %lu\n", ws->fd, ws->buf, ws->len);
 	}
+
+log_stream_sample:
+	log_open();
+	for(i = 0, iter = swsl->head; i < list_size(swsl); i++, iter = iter->next){
+		ws = iter->data;
+
+		sprintf(sockfdstr, "%lu", ws->fd);
+		strcpy(path, basepath);
+		strcat(path, sockfdstr);
+		ret = readlink(path, buf, BUF_SIZE);
+		if(-1 == ret)
+			continue;
+		buf[ret] = 0;
+
+		if(0 == strncmp(buf, "socket:[", 8)){
+			char rem_addr[64] = {0};
+			char ip[64] = {0};
+			char port[32] = {0};
+			char ipport[128];
+			int tcp;
+			int ipv4;
+			get_rem_addr_by_sockfd(proc, ws->fd, rem_addr, &tcp, &ipv4);
+			get_ip_port_from_rem_addr(rem_addr, ipv4, ip, port);
+			strcpy(ipport, ip);
+			strcat(ipport, ":");
+			strcat(ipport, port);
+
+			syslog(LOG_ERR, LOG_PREFIX"process(PID=%d)'s invalid stream ipport: %s\n", proc->pid, ipport);
+		}
+	}
+	log_close();
 	pthread_spin_unlock(&proc->swsl_lock);
 
 	return true;
