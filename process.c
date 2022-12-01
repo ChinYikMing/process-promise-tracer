@@ -374,13 +374,20 @@ bool if_parse_error(struct json_object* obj, Process *proc)
 	return true;
 }
 
-struct data *data_new(const char* val1, const char* val2){
+struct data *data_new(const char* val1, char* val2){
 	struct data *d = malloc(sizeof(struct data));
 	if(!d)
 		return NULL;
 
-	d->val1 = strdup(val1);
-	d->val2 = strdup(val2);
+	if(val1)
+		d->val1 = strdup(val1);
+	else
+		d->val1 = NULL;
+	if(val2)
+		d->val2 = strdup(val2);
+	else
+		d->val2 = NULL;
+
 	return d;
 }
 
@@ -457,11 +464,24 @@ bool process_promise_pass(Process *proc){
 	{
 		struct json_object* jvalue = json_object_array_get_idx(device, i);
 		struct json_object* device_i = json_object_object_get(jvalue, "device");
-		struct json_object* mask = json_object_object_get(jvalue, "action_mask");
-		if(!if_parse_error(device_i, proc) || !if_parse_error(mask, proc))
+		struct json_object* save = json_object_object_get(jvalue, "save");
+		struct json_object* stream = json_object_object_get(jvalue, "stream");
+		if(!if_parse_error(device_i, proc) || !if_parse_error(save, proc) || !if_parse_error(stream, proc))
 			return false;
 		const char* device_ = json_object_get_string(device_i);
-		const char* mask_ = json_object_get_string(mask);
+		const char* save_ = json_object_get_string(save);
+		const char* stream_ = json_object_get_string(stream);
+		char mask_[3] = {0};
+		if(0 == strcmp(save_, "true"))
+			mask_[1] = '1';
+		else
+			mask_[1] = '0';
+
+		if(0 == strcmp(stream_, "true"))
+			mask_[0] = '1';
+		else
+			mask_[0] = '0';
+		//printf("mask: %s\n", mask_);
 		d = data_new(device_, mask_);
 		node = node_create(d);
 		list_push_back(proc->device_list, node);
@@ -475,12 +495,10 @@ bool process_promise_pass(Process *proc){
 	{
 		struct json_object* jvalue = json_object_array_get_idx(files, i);
 		struct json_object* file_name = json_object_object_get(jvalue, "file_name");
-		struct json_object* type = json_object_object_get(jvalue, "type");
-		if(!if_parse_error(file_name, proc) || !if_parse_error(type, proc))
+		if(!if_parse_error(file_name, proc))
 			return false;
 		const char* file_name_ = json_object_get_string(file_name);
-		const char* type_ = json_object_get_string(type);
-		d = data_new(file_name_, type_);
+		d = data_new(file_name_, NULL);
 		node = node_create(d);
 		list_push_back(proc->access_file_list, node);
 	}
@@ -493,12 +511,10 @@ bool process_promise_pass(Process *proc){
 	{
 		struct json_object* jvalue = json_object_array_get_idx(con, i);
 		struct json_object* ipport = json_object_object_get(jvalue, "ipport");
-		struct json_object* mask = json_object_object_get(jvalue, "action_mask");
-		if(!if_parse_error(ipport, proc) || !if_parse_error(mask, proc))
+		if(!if_parse_error(ipport, proc))
 			return false;
 		const char* ipport_ = json_object_get_string(ipport);
-		const char* mask_ = json_object_get_string(mask);
-		d = data_new(ipport_, mask_);
+		d = data_new(ipport_, NULL);
 		node = node_create(d);
 		list_push_back(proc->connection_list, node);
 	}
@@ -1703,8 +1719,8 @@ void scan_proc_dir(List *process_list, const char *dir, Process *repeat){
 					}
 
 					action_mask = d->val2;
-					save = get_action_bit(action_mask, 1);
-					stream = get_action_bit(action_mask, 2);
+					save = get_action_bit(action_mask, 0);
+					stream = get_action_bit(action_mask, 1);
 
 					if(load_evt_high(proc)){
 						ret1 = invalid_write(proc, save);

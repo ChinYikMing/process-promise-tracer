@@ -3,7 +3,8 @@
 	[
 		{
 			"device": "camera",
-			"action_mask": "0101"
+			"save": "false",
+			"stream": "true"
 		}
 	],
 	"files":
@@ -12,8 +13,7 @@
 	"connections":
 	[
 		{
-			"ipport": "127.0.0.1:8080",
-			"action_mask": "000"
+			"ipport": "127.0.0.1:8080"
 		}
 	]
 }

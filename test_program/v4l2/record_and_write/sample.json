@@ -3,14 +3,14 @@
 	[
 		{
 			"device": "camera",
-			"action_mask": "0011"
+			"save": "true",
+			"stream": "false"
 		}
 	],
 	"files":
 	[
 		{
-			"file_name": "VideoTest.avi",
-			"type": "video"
+			"file_name": "apple.avi"
 		}
 	],
 	"connections":

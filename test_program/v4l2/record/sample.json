@@ -3,7 +3,8 @@
 	[
 		{
 			"device": "camera",
-			"action_mask": "001"
+			"save": "false",
+			"stream": "false"
 		}
 	],
 	"files":
